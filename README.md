@@ -15,6 +15,8 @@ less fiddly, without giving up control over the prompt.
 No install step. No dependencies. Python 3.10+ standard library and a folder of
 static files.
 
+![The chat, with the prompt rail open](docs/shots/chat.png)
+
 ---
 
 ## Why
@@ -51,6 +53,22 @@ you the exact outgoing prompt, and lets you edit every injected layer.
 - Reasoning prefill and reply prefill, with honest per-backend labelling of what
   actually works where
 - **SMS sidechat** — a separate phone-styled thread with the same character
+- **Or no character at all.** "Just talk to the model" opens a plain chat with
+  your preset, your jailbreak, your samplers and your persona, and nothing
+  else — a local LLM front-end when you want one, in the same window.
+
+![A plain chat with no character loaded](docs/shots/plain-chat.png)
+
+- **More than one character in a scene**, with only one of them speaking per
+  turn. Who speaks next is decided *before* the turn from six free rules — you
+  picked her, she was asked directly, she still has the floor, it is her turn —
+  and every reply says which rule it was. No extra model call, no coin flip.
+  Everyone else in the room gets a short dossier, so she can describe them
+  without borrowing their personality.
+- **Lorebooks** — import SillyTavern World Info files or lift the book out of a
+  card. Attach to a character, one chat, or everything; several at once, none
+  of them merged. The inspector names every entry that fired, what it cost, and
+  how many more matched but did not fit.
 - **Post it** — turn a log into a PNG worth posting, not a screenshot. Draws the
   real bubbles with no browser chrome, unclips her reasoning and your code
   blocks (both of which scroll on screen and would simply be lost in a
@@ -76,6 +94,9 @@ you the exact outgoing prompt, and lets you edit every injected layer.
   toggleable per chat
 
 **Studio — images, video, voice, music**
+
+![The studio: ten one-click shots, and the GPU broker](docs/shots/studio.png)
+
 - **Ten one-click shots.** Modelling photo, filthy solo, selfie, handjob,
   blowjob, this-moment, ASMR, song, "say it out loud" — and **"describe it"**,
   where you type what you want in plain English and she translates it into
@@ -110,7 +131,10 @@ you the exact outgoing prompt, and lets you edit every injected layer.
 **Control**
 - 🔍 **Prompt inspector** — the exact outgoing payload, rendered and as raw
   JSON, with token counts. Built on the same code path the real request uses, so
-  it cannot drift.
+  it cannot drift. Every block is named, priced, and switchable from here.
+
+![The prompt inspector — every block named, priced and editable](docs/shots/inspector.png)
+
 - **Editable prompt layers** — director framing, texting rules, in-character
   thinking, the forge's own prompts, the memory extractor. All named, described,
   and yours to rewrite. Reset any of them.
@@ -176,10 +200,24 @@ LM Studio serving Gemma 4 12B. Measured there: a Krea 2 still in 12s, Anima in
 with native audio in 64s, with the chat model stepping off the card and back
 on around it.
 
-A first-run wizard and walkthrough mode are planned.
+A first-run wizard and a walkthrough both ship — a fresh install seeds itself
+with presets, jailbreaks, a persona and a character, so there is no empty room
+to configure your way out of.
 
-Contributions in the spirit of the constraints welcome — stdlib only, no build
-step, and don't hide the prompt from the user.
+## Contributing
+
+Read **[PHILOSOPHY.md](PHILOSOPHY.md)** first — it is short, and it says what
+this is for, what it will not become, and where help is actually wanted.
+
+The short version: local first with cloud APIs as deliberate second-class
+citizens; presets are toggleable prompt blocks rather than 24,000-token JSON;
+your log stays canonical; no dependencies, ever; measure it and say the number.
+
+**The flagship ask is VRAM parking on every local backend.** LM Studio and
+KoboldCpp are done; Ollama, TabbyAPI, vLLM, SGLang and llama-server currently
+fall back to a pair of shell commands you write yourself. A driver is one file,
+four functions and a stand-in test, and if you run one of those you are the
+only person who can test it properly.
 
 ## Licence
 
