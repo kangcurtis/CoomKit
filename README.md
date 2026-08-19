@@ -141,6 +141,12 @@ you the exact outgoing prompt, and lets you edit every injected layer.
 - **Director mode** — steer the scene from outside it. Stage direction she obeys
   without acknowledging.
 - Personas, sampler presets, jailbreak library, live sampler controls
+- **It shows you round itself.** A first-run wizard finds your model, pings your
+  ComfyUI and installs a starter library, and an 18-step walkthrough then points
+  at the real interface — roster, forge, the studio's ten shots, the GPU broker,
+  memory, the inspector, prompt blocks — narrated by the girl in the corner, on
+  a throwaway demo conversation so you need no card and no model to take it.
+  Replay it any time with **?** in the topbar; **✦** reruns setup.
 
 **Privacy**
 - Everything is local: SQLite, a config file, your assets on disk
