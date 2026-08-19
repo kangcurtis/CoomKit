@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CoomKit</title>
+<script>
+  // Inline and BEFORE the stylesheet on purpose: set from app.js and the page
+  // paints the default palette first, then repaints — a rose flash on every
+  // load for anyone using another theme. Kept tiny and dependency-free.
+  try {
+    var t = localStorage.getItem('coomkit.theme.v1');
+    if (t && t !== 'rose') document.documentElement.setAttribute('data-theme', t);
+  } catch (e) { /* private mode: default theme is a fine outcome */ }
+</script>
 <link rel="stylesheet" href="/style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>%F0%9F%92%85</text></svg>">
 </head>
@@ -25,6 +34,7 @@
     <button class="icon-btn" id="toggleLeft" title="Roster ([)">◧</button>
     <button class="icon-btn" id="toggleRight" title="Side panel (])">◨</button>
     <button class="icon-btn" id="toggleZen" title="Zen: just the chat (\)">⛶</button>
+    <button class="icon-btn" id="toggleTheme" title="Switch colour theme">◐</button>
     <button class="icon-btn" id="openTour" title="Show me around">?</button>
     <button class="icon-btn" id="openWizard" title="Run first-time setup again">✦</button>
     <button class="icon-btn" id="openSettings" title="Settings">⚙</button>

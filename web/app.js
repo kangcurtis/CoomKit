@@ -204,6 +204,9 @@ async function boot() {
   syncSceneFromPreset();
   loadPromptRail();          // the prompt rail is the default tab
   restoreUI(ui);
+  // The <head> script already set the attribute; this syncs S.theme and the
+  // button's tooltip without repainting.
+  applyTheme(localStorage.getItem('coomkit.theme.v1') || 'rose');
   await restoreChat(ui);
   // First run. This used to also require `!S.presets.length`, which
   // server.seed_first_run() makes permanently false — it installs the shipped
@@ -5619,6 +5622,33 @@ $('tourNext').onclick = async () => {
   await tourAt(S.tour);
 };
 $('tourQuit').onclick = endTour;
+// ── themes ───────────────────────────────────────────────────────────────
+// Tokens only: every theme redefines the same names and no rule below :root
+// knows which is on. Stored under its own key rather than in
+// coomkit.session.v1 because the <head> script has to read it before any of
+// this file has parsed, and parsing the whole session blob there would be
+// slower and would couple boot to the session schema.
+const THEMES = [
+  ['rose', 'Rose / violet'],
+  ['hunter', 'Hunter green'],
+];
+
+function applyTheme(name) {
+  const known = THEMES.some((t) => t[0] === name) ? name : 'rose';
+  if (known === 'rose') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', known);
+  try { localStorage.setItem('coomkit.theme.v1', known); } catch { /* private mode */ }
+  S.theme = known;
+  const b = $('toggleTheme');
+  const next = THEMES[(THEMES.findIndex((t) => t[0] === known) + 1) % THEMES.length];
+  if (b) b.title = `Theme: ${THEMES.find((t) => t[0] === known)[1]} — click for ${next[1]}`;
+}
+
+$('toggleTheme').onclick = () => {
+  const i = THEMES.findIndex((t) => t[0] === (S.theme || 'rose'));
+  applyTheme(THEMES[(i + 1) % THEMES.length][0]);
+};
+
 $('openTour').onclick = startTour;
 window.addEventListener('resize', () => { if (!$('tour').hidden) tourAt(S.tour); });
 document.addEventListener('keydown', (e) => {
@@ -5788,6 +5818,15 @@ async function ckRaster(el, W, H) {
 // A stage that is positioned and clipped, and a host that is NOT. Only the
 // host is serialised: any position/left on the serialised element carries the
 // offset into the SVG viewport and the content lands outside it.
+// Every palette token, so the export can carry the ACTIVE theme.
+const CK_TOKENS = ['accent', 'accent-lit', 'accent-deep', 'second', 'second-lit',
+  'second-deep', 'gold', 'gold-lit', 'ink', 'bg', 'surface-0', 'surface',
+  'surface-2', 'surface-3', 'line', 'line-lit', 'text', 'text-dim', 'text-mute',
+  'on-accent', 'ok', 'bad', 'bad-lit', 'bad-line',
+  'accent-rgb', 'accent-lit-rgb', 'accent-deep-rgb', 'second-rgb',
+  'second-deep-rgb', 'gold-rgb', 'gold-lit-rgb', 'ok-rgb', 'ink-rgb', 'bg-rgb',
+  'surface-rgb'];
+
 function ckStage(W, cls) {
   const stage = document.createElement('div');
   stage.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;'
@@ -5796,6 +5835,24 @@ function ckStage(W, cls) {
   const host = document.createElement('div');
   host.className = cls;
   host.style.width = W + 'px';   // width and nothing else
+  // THE THEME HAS TO TRAVEL IN THE MARKUP. ckRaster builds its own document —
+  // svg > foreignObject > div > [style, host] — so there is no <html> and no
+  // <body> in it, and `:root[data-theme=…]` cannot match: `:root` resolves to
+  // the <svg>, which never carries the attribute. Today's palette survives
+  // only because bare `:root{--bg:…}` matches that <svg> and custom properties
+  // inherit through foreignObject. Qualify the selector and the inheritance
+  // stops, silently — you get a themed canvas (ckTok reads the LIVE page) with
+  // a default-palette title card and footer, and ckCanary cannot see it
+  // because it only counts distinct colours. Measured: with the rule in
+  // style.css, an attribute on the serialised element works and one on <html>
+  // does not. So snapshot the resolved values inline instead; they win over
+  // the :root defaults the <svg> still supplies, and both consumers then read
+  // the same getComputedStyle call and cannot diverge.
+  const cs = getComputedStyle(document.documentElement);
+  for (const t of CK_TOKENS) {
+    const v = cs.getPropertyValue('--' + t).trim();
+    if (v) host.style.setProperty('--' + t, v);
+  }
   stage.appendChild(host);
   return { stage, host };
 }

@@ -141,6 +141,10 @@ you the exact outgoing prompt, and lets you edit every injected layer.
 - **Director mode** — steer the scene from outside it. Stage direction she obeys
   without acknowledging.
 - Personas, sampler presets, jailbreak library, live sampler controls
+- **Themes.** Rose/violet or hunter green, toggled with ◐ in the topbar. Purely
+  tokens — every palette colour lives in one block, so a new theme is one CSS
+  block and nothing else. Both ship passing WCAG AA on all 17 measured pairs,
+  and a test keeps it that way.
 - **It shows you round itself.** A first-run wizard finds your model, pings your
   ComfyUI and installs a starter library, and an 18-step walkthrough then points
   at the real interface — roster, forge, the studio's ten shots, the GPU broker,

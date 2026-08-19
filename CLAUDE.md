@@ -628,6 +628,49 @@ gallery rests on, and attaching provenance to the messages broke it the moment
 it was tried. `llm.build_payload` strips both keys again at the wire as a
 backstop, so no caller can leak them to a backend.
 
+**Themes are tokens only, and the export is where they break.** `style.css`
+defines the palette in `:root`; a theme redefines the same names under
+`[data-theme="…"]` and nothing below knows which is on. Every palette colour is
+a token — no literal outside those blocks except pure black shadows and
+`#fff`/`#000` — and anything needing alpha composes from an `-rgb` triplet
+(`rgba(var(--accent-rgb), .16)`), which is why the triplets exist and why they
+must move with their hex.
+
+**The selector is a BARE attribute selector, never `:root[data-theme=…]`, and
+this is the whole trap.** `ckRaster` builds its own document — `svg >
+foreignObject > div > [style, host]` — so there is no `<html>` and no `<body>`
+in it, and `:root` resolves to the `<svg>`, which never carries the attribute.
+Today's palette survives only because an unqualified `:root { --bg: … }`
+matches that `<svg>` and custom properties inherit through `foreignObject`.
+Qualify the selector and the inheritance stops — while `ckTok` keeps reading
+the LIVE page, so the canvas ground IS themed and you get a green sheet with a
+rose-black title card and footer, on every export, with no error. `ckCanary`
+cannot catch it: it only counts distinct colours.
+
+Measured, with the rule in `style.css`: an attribute on the **serialised
+element** themes it, one on an **ancestor inside the subtree** themes it, one
+on **`<html>` does not**. So `ckStage` snapshots the resolved tokens as inline
+declarations on the host it builds; they beat the `:root` defaults the `<svg>`
+still supplies, and both consumers then read the same `getComputedStyle` call
+and cannot diverge. **A new token must be added to `CK_TOKENS` or it silently
+exports in the wrong theme** — `tests/test_theme.py` asserts that list against
+the palette.
+
+**Adding a second palette meant measuring the first, and it had six WCAG
+failures** — `--line-lit` at **1.66:1**, the edge of every button, input and
+bubble and effectively invisible to a low-vision user, and `--text-mute` tuned
+against `--surface` at exactly 4.51 with nobody checking the two lighter panels
+it actually sits on. Both palettes now clear all 17 pairs and
+`tests/test_theme.py` keeps them there, so a third theme cannot ship worse.
+Fixing it visibly restyled the rose theme; that was the right trade.
+
+**`--ok` has 28° of hue clearance in the green theme and no more.** Accent H151
+and `--second` H207 leave a 56° corridor; teal H179 is the midpoint. The old
+palette had 136°. Widening it means moving `--second` close enough to the
+accent that it reads as *the accent, disabled*. Recorded so nobody re-derives
+it — and it is why `.dot.bad` had to stop borrowing `--accent-deep`.
+
+
 **The image export is a SECOND consumer of `style.css`, and it fails silently
 and totally.** `📸 post` builds a clean offscreen subtree from the app's own
 classes, serialises it into an SVG `<foreignObject>` with `/style.css` inlined,
@@ -1050,6 +1093,12 @@ tokens; the rest are offline or local-only.
   refuses to act) and the restart gap (the port vanishes mid-reload). Also
   pins `_lms_key`, the LM Studio key bug. Offline and free. It does not prove
   a real KoboldCpp behaves as documented; nothing here does.
+- `tests/test_theme.py` pins the palettes: every theme defines every token the
+  default does, every `-rgb` triplet matches its hex, no palette literal
+  escapes the palette blocks, all 17 contrast pairs clear WCAG AA in BOTH
+  themes, and `CK_TOKENS` covers the whole palette so the export cannot carry
+  a stale colour. Each guard was proven by deliberately breaking it. Offline
+  and free — it is arithmetic over style.css.
 - `tests/test_lore.py` pins lorebooks, and its FIRST section is the gate on the
   whole feature: today's `_lorebook_entries` is kept verbatim as an oracle and
   diffed against `lore.from_card` + `lore.select` over 19 entry shapes and 6
