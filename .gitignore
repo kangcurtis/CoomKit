@@ -19,3 +19,9 @@ or-key
 # scratch planning from the original build. Everything in it either shipped
 # or moved into CLAUDE.md; kept locally, not published.
 .hermes/
+
+# Local-only operational notes. NOT for the public snapshot — RELEASE.local.md
+# names both GitHub accounts, and CLAUDE.md (which DOES ship) must never repeat
+# anything from it.
+*.local.md
+.coomkit-pub-credentials

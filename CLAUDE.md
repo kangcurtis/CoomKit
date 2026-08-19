@@ -3,6 +3,18 @@
 Read this before touching anything. It exists so a fresh session doesn't
 rediscover the same landmines.
 
+> **This file is published.** It is a tracked file and it ships verbatim in the
+> public release, so treat every line as public writing: no absolute paths from
+> the dev machine, no account names, no filenames from anybody's private
+> collection, no credentials. Measurements and reasoning are the point and they
+> belong here; the provenance of the data usually does not — say "a Chinese
+> lorebook", not the filename.
+>
+> Operational notes that are NOT publishable — releasing, remotes, credentials
+> — live in `RELEASE.local.md`, which is gitignored. If you are about to touch a
+> git remote, read that first; it exists because getting this wrong is not
+> recoverable once pushed.
+
 ## What this is
 
 A local-first NSFW companion harness — a SillyTavern alternative aimed at
