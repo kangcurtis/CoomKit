@@ -1,0 +1,88 @@
+{
+  "sets": [
+    {
+      "id": "quality",
+      "label": "Quality",
+      "hint": "Anima's preamble. The first four are the workflow default.",
+      "tags": ["masterpiece", "best quality", "score_7", "score_8", "score_9", "highly detailed", "detailed background", "absurdres", "highres", "official art", "very aesthetic", "newest"]
+    },
+    {
+      "id": "rating",
+      "label": "Rating",
+      "hint": "Pick one. Danbooru's content rating, and a real lever on output.",
+      "exclusive": true,
+      "tags": ["safe", "sensitive", "questionable", "explicit"]
+    },
+    {
+      "id": "framing",
+      "label": "Framing",
+      "hint": "Shot distance. Pick one — stacking these fights itself.",
+      "exclusive": true,
+      "tags": ["portrait", "close-up", "upper body", "cowboy shot", "full body", "wide shot", "face focus", "solo focus"]
+    },
+    {
+      "id": "angle",
+      "label": "Camera angle",
+      "hint": "Where the camera sits relative to the subject.",
+      "tags": ["from above", "from below", "from side", "from behind", "from front", "dutch angle", "straight-on", "profile", "three-quarter view", "pov", "foreshortening", "fisheye"]
+    },
+    {
+      "id": "lighting",
+      "label": "Lighting",
+      "hint": "The strongest single quality lever in any prompt.",
+      "tags": ["cinematic lighting", "dramatic lighting", "backlighting", "rim light", "sunlight", "dappled sunlight", "god rays", "lens flare", "volumetric lighting", "soft lighting", "harsh shadows", "chiaroscuro", "neon lights", "bioluminescence", "glowing", "light particles", "silhouette", "moonlight", "candlelight", "underlighting"]
+    },
+    {
+      "id": "time",
+      "label": "Time & weather",
+      "tags": ["night", "sunset", "sunrise", "golden hour", "twilight", "blue hour", "daytime", "overcast", "rain", "snow", "fog", "storm", "starry sky", "aurora", "cloudy sky", "sky", "wind"]
+    },
+    {
+      "id": "expression",
+      "label": "Expression",
+      "tags": ["smile", "grin", "light smile", "open mouth", "closed mouth", "serious", "frown", "pout", "blush", "embarrassed", "surprised", "crying", "tears", "wink", "smug", "expressionless", "half-closed eyes", "closed eyes", "looking at viewer", "looking away", "looking up", "looking down", "looking back"]
+    },
+    {
+      "id": "hair",
+      "label": "Hair",
+      "tags": ["long hair", "very long hair", "short hair", "medium hair", "twintails", "ponytail", "side ponytail", "twin braids", "braid", "hair bun", "double bun", "messy hair", "wavy hair", "straight hair", "curly hair", "hair ornament", "hairband", "hair ribbon", "ahoge", "bangs", "blunt bangs", "sidelocks", "floating hair", "hair between eyes", "wind lift"]
+    },
+    {
+      "id": "colors",
+      "label": "Hair & eye colour",
+      "tags": ["aqua hair", "blue hair", "black hair", "blonde hair", "brown hair", "silver hair", "white hair", "pink hair", "purple hair", "red hair", "green hair", "gradient hair", "multicolored hair", "aqua eyes", "blue eyes", "green eyes", "red eyes", "purple eyes", "yellow eyes", "heterochromia", "glowing eyes"]
+    },
+    {
+      "id": "pose",
+      "label": "Pose & action",
+      "tags": ["standing", "sitting", "kneeling", "lying", "walking", "running", "jumping", "leaning forward", "arms up", "arms behind back", "hands on hips", "hand on own face", "crossed arms", "outstretched arm", "reaching towards viewer", "head tilt", "looking over shoulder", "stretching", "sitting on ledge", "dancing", "holding", "holding weapon", "waving", "peace sign", "dynamic pose", "action pose", "floating", "falling"]
+    },
+    {
+      "id": "clothing",
+      "label": "Clothing",
+      "tags": ["school uniform", "serafuku", "detached sleeves", "necktie", "pleated skirt", "thighhighs", "zettai ryouiki", "hoodie", "jacket", "coat", "trench coat", "dress", "sundress", "evening gown", "kimono", "yukata", "armor", "cape", "cloak", "shirt", "t-shirt", "shorts", "jeans", "boots", "gloves", "scarf", "hat", "beret", "headphones", "glasses", "jewelry", "earrings"]
+    },
+    {
+      "id": "setting",
+      "label": "Setting",
+      "tags": ["outdoors", "indoors", "cityscape", "city lights", "skyline", "rooftop", "street", "alley", "forest", "beach", "ocean", "mountain", "field", "flower field", "cherry blossoms", "garden", "bedroom", "classroom", "cafe", "library", "shrine", "ruins", "cyberpunk", "fantasy", "space", "underwater", "train interior", "simple background", "white background", "gradient background", "transparent background"]
+    },
+    {
+      "id": "effects",
+      "label": "Effects & rendering",
+      "tags": ["depth of field", "bokeh", "blurry background", "motion blur", "chromatic aberration", "film grain", "vignetting", "lens flare", "particles", "petals", "falling petals", "sparkle", "water drops", "splashing", "fire", "smoke", "dust", "magic circle", "energy", "reflection", "caustics", "vibrant colors", "muted colors", "monochrome", "limited palette"]
+    },
+    {
+      "id": "style",
+      "label": "Art style",
+      "tags": ["anime", "anime coloring", "flat color", "cel shading", "sketch", "lineart", "watercolor", "watercolor \\(medium\\)", "oil painting \\(medium\\)", "traditional media", "digital painting", "concept art", "illustration", "chibi", "realistic", "semi-realistic", "retro artstyle", "1980s \\(style\\)", "1990s \\(style\\)", "pixel art", "manga", "sketch lines", "thick outlines", "impasto"]
+    },
+    {
+      "id": "negative",
+      "label": "Negative",
+      "hint": "Appended to the negative box, not the prompt.",
+      "negative": true,
+      "tags": ["worst quality", "low quality", "score_1", "score_2", "score_3", "blurry", "jpeg artifacts", "sepia", "bad hands", "bad anatomy", "extra digits", "fewer digits", "missing fingers", "extra limbs", "mutated hands", "watermark", "signature", "artist name", "text", "logo", "censored", "monochrome", "greyscale"]
+    }
+  ]
+}

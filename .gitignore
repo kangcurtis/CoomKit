@@ -1,0 +1,21 @@
+data/
+*.pid
+*.log
+__pycache__/
+or-key
+
+# Character cards dropped in the root to test against. Someone else's art and
+# someone else's writing — useful locally, not ours to redistribute.
+# Gemma-chan used to be excepted here; she lives in docs/banner.png now, which
+# this rule does not reach (it is root-only). cards/ is ours and ships.
+/*.png
+/*.charx
+
+# SillyTavern presets dropped in the root to study or import. Other people's
+# work, often 300 KB of it, and not ours to redistribute.
+/*.json
+/st-presets/
+
+# scratch planning from the original build. Everything in it either shipped
+# or moved into CLAUDE.md; kept locally, not published.
+.hermes/
