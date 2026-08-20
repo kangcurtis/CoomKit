@@ -19,22 +19,6 @@ static files.
 
 ---
 
-## Why
-
-SillyTavern works, but two things wear you down.
-
-**Cards go stale.** A card ships one `first_mes` and maybe a few alternate
-greetings. After a handful of sessions you've read them all and the character
-feels exhausted — even though the character is fine. It's the *setup* that went
-stale. CoomKit brainstorms a fresh situation with you instead, using what it
-knows about you and what the two of you have already done, then starts the chat
-already in motion.
-
-**You can't see what it's sending.** Every harness quietly injects a dozen
-instructions on your behalf. When output goes wrong you end up tuning samplers
-for an hour because some invisible sentence is steering the model. CoomKit shows
-you the exact outgoing prompt, and lets you edit every injected layer.
-
 ## What it does
 
 **Chat**
