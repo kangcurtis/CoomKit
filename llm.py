@@ -438,9 +438,32 @@ def encode_image(path: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
-def vision_message(text: str, image_paths: list[str]) -> dict:
-    """User message with local images inlined as data URLs."""
-    content = [{"type": "image_url", "image_url": {"url": encode_image(p)}}
-               for p in image_paths]
+def encode_bytes(raw: bytes, name: str = "image.png") -> str:
+    """Raw image bytes -> data URL, for a picture that never touched disk.
+
+    Same contract as `encode_image`: the bytes are inlined into the request
+    body, and the caller is responsible for only ever doing that against a
+    local backend. The filename is used for the mime type and nothing else.
+    """
+    mime = mimetypes.guess_type(name)[0] or "image/png"
+    if not mime.startswith("image/"):
+        mime = "image/png"
+    return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+
+
+def vision_message_data(text: str, data_urls: list[str]) -> dict:
+    """User message with already-encoded images inlined.
+
+    The images go FIRST and the text last, which is the order every vision
+    model here was tuned against — the instruction reads as being about the
+    pictures above it rather than the other way round.
+    """
+    content = [{"type": "image_url", "image_url": {"url": u}}
+               for u in data_urls]
     content.append({"type": "text", "text": text})
     return {"role": "user", "content": content}
+
+
+def vision_message(text: str, image_paths: list[str]) -> dict:
+    """User message with local images inlined as data URLs."""
+    return vision_message_data(text, [encode_image(p) for p in image_paths])

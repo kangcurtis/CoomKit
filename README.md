@@ -78,6 +78,20 @@ you the exact outgoing prompt, and lets you edit every injected layer.
   before the text ever reaches the browser. Shows you the 125px thumbnail a
   reply gets, too, which is the part nobody checks until after they post.
 
+**Character forge**
+- **Invent a whole character** instead of filling in nine empty textareas.
+  Pitches several complete cards at once, built around your persona and what
+  you said you're into; argue with any of them in plain English, then commit.
+  Committing writes a real v3 card, pins her a seed so she looks like herself
+  from her first picture onward, picks her a voice and renders her portrait.
+- **Card for that feel** — you already found the picture. Drop it in and a
+  **local** vision model reads her off it, then pitches several women who all
+  look like that and are otherwise completely different people. The picture
+  decides how she looks; the pitches decide who she is. She keeps it as her
+  face and as her generation reference. The picture never leaves your machine,
+  so this needs a local vision model — a remote backend is refused outright
+  rather than quietly shown nothing and left to invent.
+
 **Scenario forge**
 - Pitches distinct fresh scenarios from the card, your persona, and optionally
   what she remembers

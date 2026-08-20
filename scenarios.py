@@ -187,20 +187,44 @@ def _salvage_objects(text: str) -> list[dict]:
     """
     out = []
     i = 0
-    while True:
+    # Stepping in by one on a failed slice (see below) makes this quadratic in
+    # the worst case, and the input is model output: `"{" * 12000` took 2.7s
+    # measured, in the request thread, with no way to abort it — the same
+    # shape of hazard as an imported regex with a nested quantifier. A real
+    # reply needs a handful of attempts, so the cap is a backstop that cannot
+    # fire in practice rather than a limit on how much is salvaged.
+    for _ in range(200):
         start = text.find("{", i)
         if start == -1:
             return out
         blob = _json_slice(text[start:], "{", "}")
         if not blob:
-            return out
+            # Same trap as the JSONDecodeError below, arrived at from the
+            # other side: a response truncated mid-array never closes its
+            # OUTER brace, so the very first slice fails and returning here
+            # threw away every complete object inside it — the exact case
+            # this function exists for. Step in and keep looking.
+            i = start + 1
+            continue
         try:
             obj = json.loads(blob)
-            if isinstance(obj, dict):
-                out.append(obj)
         except json.JSONDecodeError:
-            pass
+            # Step in by ONE, not past the whole span. Both forges ask for
+            # {"characters": [...]} / {"scenarios": [...]}, and brace-matching
+            # balances at the OUTER brace regardless of whether the contents
+            # are valid — so one malformed entry made the outer object
+            # unparseable and skipping it stepped over every good object in
+            # the array. Salvage returned nothing for the exact shape it
+            # exists to salvage, and had done since it was written; it only
+            # ever worked on a bare array, which is not what either forge
+            # asks for. Caught by a live character-forge reply with a raw
+            # newline inside mes_example.
+            i = start + 1
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
         i = start + len(blob)
+    return out
 
 
 def parse_scenarios(text: str) -> list[dict]:

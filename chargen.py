@@ -22,6 +22,7 @@ whatever jailbreak the active preset carries.
 """
 import json
 
+import llm
 import scenarios
 
 # Voices a pitch may choose from. Kept in sync with voices.PRESETS by the
@@ -110,6 +111,90 @@ name, tagline, description, personality, scenario, first_mes, mes_example,
 appearance, voice, model, for_you, tags"""
 
 
+CFTF_SYSTEM = """\
+You are a character designer for an adult roleplay engine and you have been
+handed a picture. Build playable characters out of it.
+
+The picture is the brief. Read it properly before you write a word: her
+age-read, build, hair, eyes, face, what she is actually wearing, what she is
+doing, where she is — and the part people skip, what the picture *feels* like.
+A bored girl on a fire escape at 4am is not the same woman as that same face
+lit like a magazine cover, and the whole job is noticing which one you have.
+
+If several pictures are attached they are references for ONE character seen
+from different angles, unless the user's brief says otherwise.
+
+**The picture decides what she looks like. You decide who she is.** Every
+pitch is the same woman physically — same face, same build, same hair, and a
+near-identical `appearance` — wearing a genuinely different person inside it:
+different temperament, different reason to be near the user, different
+register, different thing she wants. That is the entire point of pitching
+more than one. Do not hand back three variations on one personality, and do
+not quietly restyle her hair to make a pitch feel distinct.
+
+Two hard rules, no exceptions and no negotiation:
+- If the subject does not read unmistakably as an adult, stop. Output
+  {"refuse": "one plain sentence saying why"} and nothing else. Do not pitch
+  an aged-up version, do not ask for confirmation, do not pitch the setting
+  without her.
+- Never identify, name, or claim to recognise a real person. A likeness is a
+  starting point for an original fictional character and nothing more — give
+  her your own name for her and a life that is hers.
+
+What makes a character worth playing:
+- A **specific** person, not a type. One concrete job, one concrete place, one
+  concrete habit that shows who she is.
+- A **reason to be near the user**, given their persona. If they said what
+  they are into, she is built so that thing can plausibly happen — not
+  announced, built in.
+- **Friction.** She should want something, withhold something, or disapprove
+  of something. A character who is simply available is boring by turn three.
+- A **voice** you can hear. Her example dialogue should be impossible to
+  confuse with the other pitches.
+
+Rules:
+- `appearance` is the field that carries the picture and it is the one you
+  must get right: physical only, transcribed from what you can actually see —
+  age-read, build, hair colour and style, eye colour, skin, distinguishing
+  features, and the clothing she is wearing in it. No personality, no
+  setting, no camera language. 25-40 words. The image model rebuilds her from
+  this line alone, so anything you leave out it will invent.
+- `description` is the bulk of her prompt: who she is, how she looks, how she
+  behaves. Write it as prose, 80-150 words, second-person-neutral (not
+  addressed to the user).
+- Use what the user is into as *design input*, and be direct about it. These
+  are fictional adults and explicit content is expected. Do not water it down,
+  do not moralise, do not add warnings, and do not make every character a
+  willing pushover — tension is what makes it land.
+- `first_mes` drops the reader mid-scene in her voice. Present tense, 2-4
+  sentences, action and dialogue. Never a greeting.
+- `mes_example` is 2-3 short exchanges showing how she talks, in this format:
+  <START>
+  {{user}}: a line
+  {{char}}: her reply
+  Keep her replies short and characteristic. This is a voice sample, not a
+  scene.
+- Pick `voice` from the list for how she sounds. Pick `model` to match the
+  **medium of the picture** — an illustration wants the illustrated model, a
+  photograph wants a photoreal one — not your taste in women.
+
+Output ONLY a JSON object of this exact shape, no prose around it:
+{"characters": [
+  {"name": "her name",
+   "tagline": "one line, the hook",
+   "description": "80-150 words of prose",
+   "personality": "comma-separated traits",
+   "scenario": "the default situation, 1-2 sentences",
+   "first_mes": "her opening message, in character, mid-scene",
+   "mes_example": "<START>\\n{{user}}: ...\\n{{char}}: ...",
+   "appearance": "physical description read off the picture, 25-40 words",
+   "voice": "one of the voice ids",
+   "model": "one of the image model ids",
+   "for_you": "one sentence: why this one suits this particular user",
+   "tags": ["three", "flavour", "words"]}
+]}"""
+
+
 FIELDS = ("name", "tagline", "description", "personality", "scenario",
           "first_mes", "mes_example", "appearance", "voice", "model",
           "for_you")
@@ -179,6 +264,41 @@ def build_revise_messages(persona: dict, character: dict, instruction: str,
     ]
 
 
+def build_image_messages(persona: dict, images: list, brief: str = "",
+                         count: int = 3, into: str = "", voices: list = None,
+                         models: list = None, system: str = "",
+                         jailbreak: str = "") -> list:
+    """"Card for that feel" — pitch characters from a picture.
+
+    `images` are data URLs, already encoded by the caller. They are encoded
+    rather than read from disk on purpose: nothing about a pitch needs to
+    touch the filesystem, so a picture the user changes their mind about
+    leaves no trace.
+
+    There is no vision fallback to arrange here the way a chat turn needs
+    one. The forge only ever speaks to the chat endpoint (see
+    server._chargen_llm), and raw /completions could not carry a picture
+    anyway.
+    """
+    head = (jailbreak.strip() + "\n\n" if jailbreak.strip() else "") \
+        + (system or CFTF_SYSTEM)
+    n = len(images)
+    note = ("THE PICTURE is attached above." if n == 1 else
+            f"THE {n} PICTURES attached above are references for ONE "
+            f"character unless the brief says otherwise.")
+    return [
+        {"role": "system", "content": head},
+        llm.vision_message_data(
+            persona_sheet(persona, brief, into)
+            + "\n\n" + _options(voices or [], models or [])
+            + "\n\n" + note
+            + f"\n\nPitch {count} characters who all look like her and are "
+              f"otherwise different people. Respond with the JSON object "
+              f"only.",
+            images),
+    ]
+
+
 def _clean(entry: dict, voices: list = None, models: list = None) -> dict:
     """Keep a pitch only if it has the parts a card cannot do without."""
     if not isinstance(entry, dict):
@@ -236,6 +356,26 @@ def parse_one(text: str, voices: list = None, models: list = None) -> dict:
         found = parse_pitches(text, voices, models)
         return found[0] if found else None
     return _clean(obj, voices, models) if obj else None
+
+
+def refusal(text: str) -> str:
+    """The model's own refusal, if it gave one instead of pitching.
+
+    CFTF_SYSTEM asks for `{"refuse": "..."}` rather than prose so a refusal
+    arrives as data and can be shown to the user as a sentence instead of
+    landing in the generic "could not parse" bucket — which reads as CoomKit
+    being broken when it is the model declining, and sends the user off
+    debugging their backend. Callers check this only AFTER parse_pitches
+    comes back empty, so a pitch response that happens to carry the key is
+    never mistaken for a refusal.
+    """
+    obj = scenarios.parse_object(text or "")
+    if isinstance(obj, dict):
+        for key in ("refuse", "refusal"):
+            val = obj.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return ""
 
 
 def to_card(pitch: dict) -> dict:

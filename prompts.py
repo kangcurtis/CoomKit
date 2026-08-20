@@ -264,6 +264,17 @@ DEFAULTS = {
         "placeholders": [],
         "text": "",   # filled from chargen.PITCH_SYSTEM at import
     },
+    "chargen_image": {
+        "label": "Character forge — from a picture",
+        "group": "forge",
+        "desc": "Reads an uploaded picture and pitches characters who all "
+                "look like her. Carries the two hard rules — adults only, and "
+                "never identify a real person — so edit it with that in mind. "
+                "Must keep asking for the same JSON shape or the pitches "
+                "won't parse.",
+        "placeholders": [],
+        "text": "",   # filled from chargen.CFTF_SYSTEM at import
+    },
     "chargen_revise": {
         "label": "Character forge — revising",
         "group": "forge",
@@ -393,6 +404,8 @@ def _late_defaults():
         DEFAULTS["chargen_pitch"]["text"] = chargen.PITCH_SYSTEM
     if not DEFAULTS["chargen_revise"]["text"]:
         DEFAULTS["chargen_revise"]["text"] = chargen.REVISE_SYSTEM
+    if not DEFAULTS["chargen_image"]["text"]:
+        DEFAULTS["chargen_image"]["text"] = chargen.CFTF_SYSTEM
     # Recipe briefs are injected text like any other layer — they belong in
     # the inspector where the user can rewrite them, not buried in a dict
     # nobody can reach from the UI.

@@ -57,7 +57,33 @@ one = scenarios.parse_one('{"title":"X","premise":"Y","opening":"Z"}')
 assert one and one["title"] == "X", one
 # incomplete entries are dropped, not returned half-built
 assert scenarios.parse_scenarios('{"scenarios":[{"title":"only a title"}]}') == []
-print("parser: tolerant of noise, strict about completeness")
+
+# Salvage: one malformed entry must not cost the good ones. This did not work
+# for the wrapper shape both forges actually ask for, and had not since it was
+# written — brace-matching balances at the OUTER brace, so the invalid outer
+# object was skipped in one step and every good entry inside it went with it.
+# Found live on a character-forge reply with a raw newline inside a string.
+half = '''{"scenarios": [
+ {"title": "A", "premise": "p", "opening": "o"},
+ {"title": "B", "premise": "broken
+here", "opening": "o"}
+]}'''
+kept = scenarios.parse_scenarios(half)
+assert [x["title"] for x in kept] == ["A"], kept
+# and truncation mid-array, which is what it was written for
+cut = '{"scenarios": [{"title": "A", "premise": "p", "opening": "o"}, {"title": "B"'
+assert [x["title"] for x in scenarios.parse_scenarios(cut)] == ["A"]
+# Stepping in by one to reach those entries is quadratic on degenerate input,
+# and the input is model output running in the request thread with no way to
+# abort it. Unbounded, `"{" * 12000` took 2.7s measured.
+import time as _t  # noqa: E402
+_start = _t.time()
+assert scenarios._salvage_objects("{" * 60000) == []
+_took = _t.time() - _start
+assert _took < 3, f"salvage is unbounded on degenerate input: {_took:.1f}s"
+assert scenarios._salvage_objects("") == []
+assert scenarios._salvage_objects("no json at all") == []
+print("parser: tolerant of noise, strict about completeness, salvages the rest")
 
 # ── 1. fixture card ──────────────────────────────────────────────
 rows = call("GET", "/api/characters")["rows"]

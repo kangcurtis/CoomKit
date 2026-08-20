@@ -177,6 +177,100 @@ generation time. The active preset's jailbreak is prepended to the system
 prompt — remote models refuse this work without it, and the forge is
 explicitly meant to run on whatever backend is connected.
 
+**CFTF — "card for that feel" — is the third forge mode, and it is the only
+one that refuses rather than degrades.** You already found the picture; a
+vision model reads her off it and pitches several women who all look like that
+and are otherwise different people. **The picture decides how she looks, the
+pitches decide who she is** — that framing is in the layer, because without it
+a model asked for three characters from one photograph restyles her hair to
+make them feel distinct, which throws away the only thing the picture was for.
+
+Everything downstream of the pitch is the ordinary character forge, which is
+why `renderPitchCard` takes a `mode` rather than being copied: the two modes
+differ in exactly four things (where the cards go, whose persona, whether a
+portrait renders, whether there is a picture to commit) and the card, the
+revise box and the create button are identical.
+
+- **A configured remote is REFUSED, not told about it in-band.** Everywhere
+  else a remote turn degrades honestly — she is told there was a picture and
+  answers around it. There is no equivalent here: a pitch built from an image
+  nobody saw is three lovely characters that have nothing to do with the
+  photograph, and it is *indistinguishable from the feature working*. The
+  route says so and names the way out. It also checks `backend and model`
+  first, because a blank `remote_backends` entry normalises to the same empty
+  string as a blank backend and reported "vision is local-only" for a request
+  that simply had no backend.
+- **No vision fallback to arrange.** The forge only ever speaks to the chat
+  endpoint (`_chargen_llm`), so the `meta["vision_fallback"]` dance a chat
+  turn needs does not apply.
+- **Nothing touches disk until commit.** The pictures are encoded straight out
+  of the request, so pitching from a photo and thinking better of it leaves no
+  trace. The one she commits is stored ONCE and does two jobs: it becomes her
+  `avatar` *and* her `data.visual.ref`. Her face because a card forged from a
+  photograph whose avatar is a fresh render of a *description* of that
+  photograph is not what anybody asked for; and setting it unconditionally
+  means a portrait render that fails leaves her looking like herself instead
+  of blank, since a successful render overwrites it a moment later.
+  `_store_upload` is the one writer, shared with `/api/assets/upload`.
+- **The two hard rules live in the shipped prompt and `test_cftf.py` pins
+  them**: refuse anyone who does not read unmistakably as an adult (naming the
+  aged-up dodge explicitly, or a model offers to pitch her as 25 instead), and
+  never identify a real person. The layer is user-editable like the other ten,
+  so the test pins what *ships*. A refusal comes back as `{"refuse": "..."}` —
+  data, not prose — so it can be shown as a sentence instead of landing in the
+  generic "could not parse" bucket, which reads as CoomKit being broken.
+  `chargen.refusal` is consulted only AFTER `parse_pitches` comes back empty.
+- `cgBody` drops `requestBody()`'s `images`. The chat composer's attachments
+  have nothing to do with the card being built, and on this route they would
+  have been read as the reference picture.
+- **ONE size cap, `server.MAX_UPLOAD`.** The pitch route reads the picture and
+  `_store_upload` writes the same picture on commit; they were written with
+  different numbers, so a 25 MB file was dropped from the pitch and accepted
+  at commit with the user told neither. Every rejected picture is now NAMED
+  with its reason, and a partial drop comes back as a `notice` on an otherwise
+  successful pitch — sharing one `continue` between "not valid base64" and
+  "too big" reported a structurally perfect 22 MB PNG as "could not read that
+  picture", which sends the user off re-exporting a file that was never the
+  problem, and with several pictures the oversized one vanished silently while
+  `build_image_messages` told the model it had been sent one fewer than the
+  user chose. There is deliberately **no client-side size check**:
+  it would mean a second copy of `MAX_UPLOAD` in `app.js` with nothing to keep
+  the two in step, and the server answers in 0.1s naming the cap, before any
+  model call.
+- **`cfThumbs()` derives the button state, including the in-flight guard.**
+  Every ✕ calls it, so deriving `disabled` from the image count alone
+  re-enabled the button *while the vision model was still reading* — and a
+  second click put two interleaved sets of pitch cards on screen. Harmless to
+  the data (`S.pitches`/`S.feelPitches` are write-only; the card's closure
+  holds the real object) but not to the user.
+
+**Live testing it found a parser bug that had been there since the forges were
+written.** `scenarios._salvage_objects` — "pull every complete object out of a
+possibly-truncated response" — returned NOTHING for the wrapper shape both
+forges actually ask for. Brace-matching balances at the OUTER brace whether or
+not the contents are valid, so one malformed entry (a raw newline inside
+`mes_example`, which local models write often) made the outer object
+unparseable, and the code skipped past the whole span — stepping over every
+good object in the array. The truncation case failed the same way from the
+other side: a response cut mid-array never closes its outer brace, the first
+slice returned None, and salvage gave up on the spot. Both now step in by one
+character. It only ever worked on a *bare* array, which neither forge asks
+for, and the symptom was a pitch failing outright now and then with no pattern.
+Stepping in by one is quadratic on degenerate input, which is model output
+running in the request thread with no way to abort it — `"{" * 12000` measured
+2.7s — so the loop is capped at 200 attempts. A real reply needs a handful; the
+cap is a backstop that cannot fire in practice, not a limit on how much is
+salvaged.
+
+Measured on gemma-4-31b-qat with the shipped starter card as input: 40-68s for
+three pitches, 4/4 runs usable after the salvage fix, and it read her correctly
+— black bob with straight bangs, dark eyes, silver wristwatch, seated at a
+monitor. Every run put a byte-identical `appearance` on all three women and
+gave them genuinely different personalities, which is the whole design. It
+picks a **photoreal** model for a photograph (`krea2` one run, `zimage`
+another) and never `anima`, so the "match the medium" instruction works — but
+it is not deterministic to one model and should not be claimed as such.
+
 **Scenario forge** solves stale `first_mes`. A forged scenario is stored in
 `chats.data.scenario`, *replaces* the card's static scenario in the system
 prompt (they fight otherwise), and its `opening` seeds message one instead of

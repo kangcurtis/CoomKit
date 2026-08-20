@@ -651,6 +651,7 @@ body.zen .topbar { display: none; }
 .note { font: 11px/1.5 var(--mono); color: var(--text-mute); margin-top: 7px; }
 .note.ok { color: var(--ok); }
 .note.bad { color: var(--accent-lit); }
+.note.warn { color: var(--gold-lit); }
 
 .mem-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 5px; }
 .mem-list li {
@@ -944,6 +945,24 @@ audio.gal-thumb {
 .chip-x { border: 0; background: none; color: var(--text-mute); cursor: pointer; padding: 0; font-size: 10px; }
 .chip-x:hover { color: var(--accent-lit); }
 .badge.warm { background: rgba(var(--gold-rgb), .14); color: var(--gold-lit); }
+
+/* CFTF — the picture you build a card from */
+.hint.warn { color: var(--gold-lit); }
+.cf-drop { display: flex; align-items: center; justify-content: center;
+  min-height: 74px; padding: 14px 18px; margin: 2px 0 10px; cursor: pointer;
+  border: 1px dashed var(--line-lit); border-radius: 13px;
+  background: var(--surface-0); color: var(--text-mute); font-size: 12.5px;
+  text-align: center; }
+.cf-drop:hover { border-color: var(--accent); color: var(--text-dim);
+  background: rgba(var(--accent-rgb), .06); }
+.cf-thumbs { display: flex; flex-wrap: wrap; gap: 9px; }
+.cf-thumbs:not(:empty) { margin-bottom: 11px; }
+.cf-thumb { position: relative; }
+.cf-thumb img { display: block; width: 84px; height: 84px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--line-lit); }
+.cf-thumb .chip-x { position: absolute; top: -6px; right: -6px; line-height: 1;
+  padding: 2px 5px; border-radius: 50%; background: var(--surface-3);
+  border: 1px solid var(--line); }
 
 /* character forge pitches */
 .pitch { background: var(--surface); border: 1px solid var(--line); border-radius: 14px;

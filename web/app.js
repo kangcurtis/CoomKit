@@ -605,7 +605,8 @@ rosterEl.addEventListener('drop', async (ev) => {
 async function loadPersonas() {
   const { rows } = await api('/api/personas');
   S.personas = rows || [];
-  for (const [selId, blank] of [['personaSel', '(just me)'], ['personaList', '— new persona —'], ['cgPersonaSel', '(nobody in particular)']]) {
+  for (const [selId, blank] of [['personaSel', '(just me)'], ['personaList', '— new persona —'],
+    ['cgPersonaSel', '(nobody in particular)'], ['cfPersonaSel', '(nobody in particular)']]) {
     const sel = $(selId);
     if (!sel) continue;
     const keep = sel.value;
@@ -2366,6 +2367,7 @@ function forgeFill() {
 const FORGE_TABS = {
   cards:     { title: 'Cards',            char: true  },
   character: { title: 'Character forge',  char: false },
+  feel:      { title: 'Card for that feel', char: false },
   scene:     { title: 'Scenario forge',   char: true  },
   you:       { title: 'You',              char: false },
 };
@@ -3747,7 +3749,8 @@ $('artistSearch').oninput = () => {
 // looks like herself forever, and renders her portrait through the ordinary
 // studio path.
 
-S.pitches = [];
+S.pitches = [];       // ☆ a whole character
+S.feelPitches = [];   // 📷 that feel
 
 // Scoped to #forgeTabs. The settings modal and the inspector both use
 // .modal-tab, and an unscoped selector here would bind over theirs.
@@ -3755,10 +3758,33 @@ document.querySelectorAll('#forgeTabs .modal-tab').forEach((b) => {
   b.onclick = () => forgeTab(b.dataset.ftab);
 });
 
-function cgBody(extra) {
-  return Object.assign(requestBody(), {
-    persona_id: $('cgPersonaSel').value || null,
-  }, extra || {});
+// The two forge modes differ in exactly four things: where the cards go, whose
+// persona is asked for, whether a portrait is rendered, and whether there is a
+// picture to hand over on commit. Everything after the pitch — the card, the
+// revise box, the create button — is identical, so it is ONE renderer taking a
+// mode rather than two copies that drift.
+const CG_MODES = {
+  invent: {
+    results: 'cgResults', persona: 'cgPersonaSel', list: 'pitches',
+    portrait: () => $('cgPortrait').checked,
+    picture: () => null,
+  },
+  feel: {
+    results: 'cfResults', persona: 'cfPersonaSel', list: 'feelPitches',
+    portrait: () => $('cfPortrait').checked,
+    picture: () => S.feel.images[0] || null,
+  },
+};
+
+function cgBody(extra, mode) {
+  const b = requestBody();
+  // requestBody() carries whatever is pinned to the CHAT composer. The forge
+  // is not the chat: an image stuck to the message box has nothing to do with
+  // the card being built, and on the from-image route it would be read as the
+  // reference picture. Drop it — the caller passes its own.
+  delete b.images;
+  b.persona_id = $((mode || CG_MODES.invent).persona).value || null;
+  return Object.assign(b, extra || {});
 }
 
 $('cgGo').onclick = async () => {
@@ -3775,10 +3801,11 @@ $('cgGo').onclick = async () => {
   if (d.error) { $('cgNote').textContent = 'failed: ' + d.error; return; }
   $('cgNote').textContent = '';
   S.pitches = d.characters;
-  S.pitches.forEach((c) => renderPitchCard(c));
+  S.pitches.forEach((c) => renderPitchCard(c, null, CG_MODES.invent));
 };
 
-function renderPitchCard(c, replaceEl) {
+function renderPitchCard(c, replaceEl, mode) {
+  mode = mode || CG_MODES.invent;
   const card = document.createElement('div');
   card.className = 'pitch';
   card.innerHTML = `
@@ -3807,7 +3834,7 @@ function renderPitchCard(c, replaceEl) {
       <span class="note pitch-status"></span>
     </div>`;
   if (replaceEl) replaceEl.replaceWith(card);
-  else $('cgResults').appendChild(card);
+  else $(mode.results).appendChild(card);
 
   const status = card.querySelector('.pitch-status');
   card.querySelector('.pitch-rev').onclick = async () => {
@@ -3815,18 +3842,27 @@ function renderPitchCard(c, replaceEl) {
     if (!instruction) return;
     status.textContent = 'revising…';
     const d = await post('/api/forge/characters/refine',
-      cgBody({ character: c, instruction }));
+      cgBody({ character: c, instruction }, mode));
     if (d.error) { status.textContent = 'failed: ' + d.error; return; }
-    const i = S.pitches.indexOf(c);
-    if (i >= 0) S.pitches[i] = d.character;
-    renderPitchCard(d.character, card);
+    const i = S[mode.list].indexOf(c);
+    if (i >= 0) S[mode.list][i] = d.character;
+    renderPitchCard(d.character, card, mode);
   };
   card.querySelector('.pitch-make').onclick = async (ev) => {
     ev.target.disabled = true;
-    status.textContent = $('cgPortrait').checked
-      ? 'writing her card and rendering her portrait…' : 'writing her card…';
-    const d = await post('/api/forge/characters/create',
-      cgBody({ character: c, portrait: $('cgPortrait').checked }));
+    const wants = mode.portrait();
+    const pic = mode.picture();
+    status.textContent = wants
+      ? 'writing her card and rendering her portrait…'
+      : (pic ? 'writing her card and giving her that face…'
+             : 'writing her card…');
+    const extra = { character: c, portrait: wants };
+    // The picture she was forged from rides along to the create call rather
+    // than being uploaded separately: the server stores it once and makes it
+    // both her face and her generation reference, so there is no window where
+    // she exists with neither.
+    if (pic) { extra.image_b64 = pic.b64; extra.image_name = pic.name; }
+    const d = await post('/api/forge/characters/create', cgBody(extra, mode));
     if (d.error) {
       status.textContent = 'failed: ' + d.error;
       ev.target.disabled = false;
@@ -3835,9 +3871,12 @@ function renderPitchCard(c, replaceEl) {
     status.textContent = d.portrait_error
       ? `created, portrait failed: ${d.portrait_error}`
       : 'created ★';
-    if (d.portrait) {
+    const shot = d.portrait ? d.portrait.url
+      : (d.character && d.character.avatar
+         ? '/api/avatars/' + d.character.avatar : '');
+    if (shot) {
       const img = document.createElement('img');
-      img.src = d.portrait.url;
+      img.src = shot;
       img.className = 'pitch-portrait';
       card.insertBefore(img, card.firstChild);
     }
@@ -3845,6 +3884,106 @@ function renderPitchCard(c, replaceEl) {
     toast(`${d.character.name} joined the roster`);
   };
 }
+
+// ── CFTF: card for that feel ─────────────────────────────────────
+// You already found the picture. A LOCAL vision model reads her off it and
+// pitches several women who all look like that and are otherwise completely
+// different people: the picture fixes how she looks, the pitches decide who
+// she is. Everything downstream of the pitch is the ordinary character forge.
+//
+// Nothing is written to disk until she is committed — the pictures live here
+// and go straight into the request — so pitching from a photo and thinking
+// better of it leaves no trace on the machine.
+S.feel = { images: [], busy: false };
+
+function cfThumbs() {
+  const box = $('cfThumbs');
+  box.innerHTML = '';
+  S.feel.images.forEach((im, i) => {
+    const d = document.createElement('div');
+    d.className = 'cf-thumb';
+    const img = document.createElement('img');
+    img.src = im.dataUrl;
+    img.alt = im.name;
+    const x = document.createElement('button');
+    x.className = 'chip-x';
+    x.textContent = '✕';
+    x.title = 'drop this one';
+    x.onclick = () => { S.feel.images.splice(i, 1); cfThumbs(); };
+    d.appendChild(img);
+    d.appendChild(x);
+    box.appendChild(d);
+  });
+  // ONE place derives the button state. It used to be `!images.length` alone,
+  // and every ✕ calls this — so pruning a thumbnail while the vision model was
+  // still reading re-enabled the button mid-request, and a second click put two
+  // interleaved sets of pitch cards on screen.
+  $('cfGo').disabled = S.feel.busy || !S.feel.images.length;
+}
+
+async function cfAdd(files) {
+  for (const f of Array.from(files || [])) {
+    if (S.feel.images.length >= 4) break;
+    if (!(f.type || '').startsWith('image/')) continue;
+    const b64 = await fileToB64(f);
+    S.feel.images.push({
+      name: f.name, b64,
+      dataUrl: `data:${f.type || 'image/png'};base64,${b64}`,
+    });
+  }
+  cfThumbs();
+}
+
+$('cfDrop').onclick = () => $('cfFile').click();
+$('cfFile').onchange = () => { cfAdd($('cfFile').files); $('cfFile').value = ''; };
+['dragover', 'dragenter'].forEach((e) => $('cfDrop').addEventListener(e, (ev) => {
+  ev.preventDefault();
+  $('cfDrop').classList.add('drop-hot');
+}));
+['dragleave', 'drop'].forEach((e) => $('cfDrop').addEventListener(e, () => {
+  $('cfDrop').classList.remove('drop-hot');
+}));
+$('cfDrop').addEventListener('drop', (ev) => {
+  ev.preventDefault();
+  cfAdd(ev.dataTransfer.files);
+});
+cfThumbs();
+
+$('cfGo').onclick = async () => {
+  if (!S.feel.images.length) { toast('drop a picture in first'); return; }
+  if (!LLM_READY()) { pickModel(); return; }
+  S.feel.busy = true;
+  cfThumbs();
+  $('cfNote').className = 'note';
+  $('cfNote').textContent = "she's looking at it…";
+  $('cfResults').innerHTML = '';
+  const d = await post('/api/forge/characters/from-image', cgBody({
+    images: S.feel.images.map((im) => ({ name: im.name, b64: im.b64 })),
+    brief: $('cfBrief').value.trim(),
+    count: Number($('cfCount').value) || 3,
+  }, CG_MODES.feel));
+  S.feel.busy = false;
+  cfThumbs();
+  if (d.error) {
+    $('cfNote').className = 'note bad';
+    // `raw` is only ever set when nothing parsed, and it is the single most
+    // useful thing on screen then: a text-only model answers this route with
+    // prose about not being able to see, which reads as CoomKit being broken
+    // until you can see what it actually said.
+    $('cfNote').textContent = d.error
+      + (d.raw ? ` — it replied: ${d.raw.slice(0, 220)}` : '');
+    return;
+  }
+  // A picture the server could not use is NAMED here. Dropping one quietly
+  // meant the model was told it had fewer references than the user chose,
+  // with nothing on screen to explain the difference.
+  $('cfNote').className = d.notice ? 'note warn' : 'note ok';
+  $('cfNote').textContent =
+    `${d.characters.length} pitched — same face, different women`
+    + (d.notice ? ` · ${d.notice}` : '');
+  S.feelPitches = d.characters;
+  S.feelPitches.forEach((c) => renderPitchCard(c, null, CG_MODES.feel));
+};
 
 // ── example dialogue toggle ──────────────────────────────────────
 function syncExamples(detail) {

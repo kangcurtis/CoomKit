@@ -634,6 +634,7 @@
     <div class="modal-tabs" id="forgeTabs">
       <button class="modal-tab on" data-ftab="cards">🎴 cards</button>
       <button class="modal-tab" data-ftab="character">☆ a whole character</button>
+      <button class="modal-tab" data-ftab="feel">📷 that feel</button>
       <button class="modal-tab" data-ftab="scene">✦ a scene</button>
       <button class="modal-tab" data-ftab="you">👤 you</button>
     </div>
@@ -821,6 +822,44 @@
       </div>
       <p class="note" id="cgNote"></p>
       <div id="cgResults"></div>
+      </div>
+
+      <div class="modal-pane" id="ftab-feel">
+      <p class="hint">You already found the picture. <b>Card for that feel</b>:
+        drop it here and a vision model reads her off it — build, hair, what
+        she's wearing, what the shot is actually about — then pitches several
+        women who all look like that and are otherwise completely different
+        people. The picture decides how she looks; the pitches decide who she
+        is. She keeps it as her face and as her generation reference.</p>
+      <p class="hint warn">The picture never leaves this machine, so this
+        needs a <b>local vision model</b> — a remote backend is refused rather
+        than quietly shown nothing.</p>
+      <div class="cf-drop" id="cfDrop">
+        <input type="file" id="cfFile" accept="image/*" multiple hidden>
+        <span>drop a picture here, or <b>click to pick one</b> · up to 4 of the same girl</span>
+      </div>
+      <div class="cf-thumbs" id="cfThumbs"></div>
+      <div class="forge-controls">
+        <label>you are
+          <select id="cfPersonaSel"></select>
+        </label>
+        <label>how many
+          <select id="cfCount">
+            <option>2</option><option selected>3</option>
+            <option>4</option><option>5</option>
+          </select>
+        </label>
+      </div>
+      <label>anything specific? <span class="lbl-hint">optional, treated as a hard requirement</span>
+        <input id="cfBrief" placeholder="she's my neighbour, make one of them genuinely mean, these are two different girls…">
+      </label>
+      <div class="forge-actions">
+        <label class="check"><input type="checkbox" id="cfPortrait"> render a fresh portrait instead of using this picture</label>
+        <div class="spacer"></div>
+        <button class="primary-btn" id="cfGo">📷 build her from this</button>
+      </div>
+      <p class="note" id="cfNote"></p>
+      <div id="cfResults"></div>
       </div>
 
       <div class="modal-pane" id="ftab-scene">

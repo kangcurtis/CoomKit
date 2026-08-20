@@ -779,6 +779,36 @@ def _row_to_dict(r: sqlite3.Row) -> dict:
     return d
 
 
+# The one size cap for anything the user hands us. Named because the forge
+# pitches from a picture and then commits the same picture through a second
+# path: two caps meant a file could be dropped from the pitch and accepted at
+# commit, and the user would be told neither.
+MAX_UPLOAD = 40 * 1024 * 1024
+MAX_UPLOAD_MB = MAX_UPLOAD // (1024 * 1024)
+
+
+def _store_upload(raw: bytes, filename: str) -> str:
+    """Write an uploaded file into data/assets/ and return its stored name.
+
+    One writer for user-supplied files, because there are now two callers —
+    the upload route and the character forge committing the picture a card
+    was built from — and a second copy of the cap and the extension check is
+    a second thing to get wrong. Raises ValueError with a message meant for
+    the user.
+    """
+    if not raw:
+        raise ValueError("no file data")
+    if len(raw) > MAX_UPLOAD:
+        raise ValueError(f"file too big ({MAX_UPLOAD_MB} MB cap)")
+    ext = Path(filename or "ref.png").suffix.lower() or ".png"
+    if not re.fullmatch(r"\.[a-z0-9]{1,5}", ext):
+        raise ValueError("unsupported file type")
+    fname = f"ref_{int(time.time() * 1000)}{ext}"
+    ASSETS.mkdir(parents=True, exist_ok=True)
+    (ASSETS / fname).write_bytes(raw)
+    return fname
+
+
 def rows_upsert(table: str, body: dict, row_id: int | None = None) -> dict:
     assert table in VALID_TABLES
     now = time.time()
@@ -1075,6 +1105,8 @@ class Handler(BaseHTTPRequestHandler):
             self._blocks_cost()
         elif url.path == "/api/forge/characters":
             self._chargen_pitch()
+        elif url.path == "/api/forge/characters/from-image":
+            self._chargen_from_image()
         elif url.path == "/api/forge/characters/refine":
             self._chargen_revise()
         elif (len(parts) == 4 and parts[:2] == ["api", "characters"]
@@ -3599,6 +3631,108 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({"ok": True, "characters": found})
 
+    def _chargen_from_image(self) -> None:
+        """POST /api/forge/characters/from-image — a card for that feel.
+
+        You have a picture and you want *her*. A vision model reads it and
+        pitches several women who all look like that and are otherwise
+        different people; from there it is the ordinary forge — same pitch
+        cards, same revise box, same commit button — because it is the same
+        interaction wearing a photograph.
+
+        Body: {images: [{name, b64}], persona_id?, brief?, into?, count?,
+               backend, model, key?, preset_id?}
+        """
+        body = self._body()
+        images = body.get("images") or []
+        if not images:
+            self._json({"error": "a picture is required"}, 400)
+            return
+
+        backend, _k, model, _s, _meta, jailbreak = self._resolve_llm(body)
+        if not (backend and model):
+            self._json({"error": "backend and model are required"}, 400)
+            return
+        # Vision is local-only BY CONSTRUCTION, and this is the one place the
+        # usual degrade does not apply. A chat turn against a remote still
+        # works — she is told in-band that there was a picture and answers
+        # around it. There is no equivalent here: a pitch built from an image
+        # nobody saw is just the ordinary forge with extra steps, and it would
+        # be indistinguishable from the feature working. So refuse and say so.
+        if any(rb.get("url") and normalise_backend(rb["url"]) == backend
+               for rb in load_config().get("remote_backends", [])):
+            self._json({"error": "vision is local-only — the picture never "
+                                 "leaves this machine, so a remote backend "
+                                 "cannot be shown it. Point CoomKit at your "
+                                 "local model for this one, or describe her "
+                                 "in the brief under ☆ a whole character."},
+                       400)
+            return
+
+        # Encoded straight from the request, never written to disk: a picture
+        # the user pitches from and then thinks better of leaves no trace.
+        # Only the one they actually commit gets stored.
+        #
+        # Every rejection is NAMED and given its reason. Sharing one `continue`
+        # between "that is not valid base64" and "that is too big" meant a
+        # perfectly good 22 MB PNG came back as "could not read that picture",
+        # blaming the file's integrity for a file that is fine; and with
+        # several pictures the oversized one vanished with no notice at all
+        # while the model was told, in build_image_messages, that it had been
+        # sent one fewer than the user chose.
+        urls, dropped = [], []
+        for im in images[:4]:
+            name = str(im.get("name") or "image.png")[:60]
+            try:
+                raw = base64.b64decode(im.get("b64", ""), validate=True)
+            except (binascii.Error, ValueError):
+                raw = b""
+            if not raw:
+                dropped.append(f"{name} — could not read it")
+            elif len(raw) > MAX_UPLOAD:
+                dropped.append(f"{name} — over the {MAX_UPLOAD_MB} MB cap")
+            else:
+                urls.append(llm.encode_bytes(raw, name))
+        if not urls:
+            self._json({"error": "no usable picture: " + "; ".join(dropped)},
+                       400)
+            return
+        if len(images) > 4:
+            dropped.append(f"{len(images) - 4} more past the 4-picture limit")
+
+        persona = (rows_get("personas", int(body["persona_id"]))
+                   if body.get("persona_id") else None)
+        voices, models = self._chargen_options()
+        messages = chargen.build_image_messages(
+            persona, urls, body.get("brief", ""),
+            max(1, min(int(body.get("count", 3)), 5)),
+            into=body.get("into", ""), voices=voices, models=models,
+            system=prompts.get("chargen_image"), jailbreak=jailbreak)
+        raw_reply, err, code = self._chargen_llm(body, messages)
+        if err:
+            self._json(err, code)
+            return
+        found = chargen.parse_pitches(raw_reply, voices, models)
+        if found:
+            out = {"ok": True, "characters": found}
+            if dropped:
+                out["notice"] = "built from %d of %d: %s" % (
+                    len(urls), len(images), "; ".join(dropped))
+            self._json(out)
+            return
+        # Checked only AFTER the pitches come back empty, so a normal reply
+        # that happens to carry the key is never read as a refusal.
+        said = chargen.refusal(raw_reply)
+        if said:
+            self._json({"error": "she would not build from that picture: "
+                                 + said, "refused": True}, 422)
+            return
+        self._json({"error": "could not parse a character out of the reply. "
+                             "If that model has no vision it never saw the "
+                             "picture at all — check the model, not the "
+                             "image.",
+                    "raw": (raw_reply or "")[:600]}, 502)
+
     def _chargen_revise(self) -> None:
         """POST /api/forge/characters/refine — argue with one pitch."""
         body = self._body()
@@ -3631,7 +3765,8 @@ class Handler(BaseHTTPRequestHandler):
         Saves the card, rolls her a pinned seed, and renders her portrait
         through the ordinary studio path so her first picture is made exactly
         the way every later one will be.
-        Body: {character, persona_id?, portrait?, backend, model, key?}
+        Body: {character, persona_id?, portrait?, backend, model, key?,
+               image_b64?, image_name?}
         """
         body = self._body()
         pitch = dict(body.get("character") or {})
@@ -3640,7 +3775,28 @@ class Handler(BaseHTTPRequestHandler):
             return
         pitch.setdefault("seed", random.randint(1, 2 ** 31 - 1))
         data = chargen.to_card(pitch)
-        row = rows_upsert("characters", {"name": pitch["name"], "data": data})
+        save = {"name": pitch["name"], "data": data}
+        # CFTF: the picture she was forged from becomes her face AND her
+        # generation reference. Her face, because a card built from a
+        # photograph whose avatar is a fresh render of a *description* of
+        # that photograph is not what anyone asked for — and if a portrait
+        # was requested it overwrites this a moment later, so a failed render
+        # leaves her looking like herself instead of leaving her blank. Her
+        # reference, because that is the same file doing the job a ref2v
+        # workflow reaches for.
+        if body.get("image_b64"):
+            try:
+                raw = base64.b64decode(body["image_b64"], validate=True)
+            except (binascii.Error, ValueError):
+                raw = b""
+            try:
+                fname = _store_upload(raw, body.get("image_name", "ref.png"))
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 400)
+                return
+            data["visual"] = {**(data.get("visual") or {}), "ref": fname}
+            save["avatar"] = fname
+        row = rows_upsert("characters", save)
 
         result = {"ok": True, "character": row, "portrait": None}
         if not body.get("portrait", True):
@@ -4441,21 +4597,13 @@ class Handler(BaseHTTPRequestHandler):
         studio can reach for it later.
         """
         body = self._body()
-        raw = base64.b64decode(body.get("b64", ""))
-        if not raw:
-            self._json({"error": "no file data"}, 400)
-            return
-        if len(raw) > 40 * 1024 * 1024:
-            self._json({"error": "file too big (40 MB cap)"}, 400)
-            return
-        ext = Path(body.get("filename", "ref.png")).suffix.lower() or ".png"
-        if not re.fullmatch(r"\.[a-z0-9]{1,5}", ext):
-            self._json({"error": "unsupported file type"}, 400)
+        try:
+            fname = _store_upload(base64.b64decode(body.get("b64", "")),
+                                  body.get("filename", "ref.png"))
+        except ValueError as exc:
+            self._json({"error": str(exc)}, 400)
             return
         kind = body.get("kind", "persona_ref")
-        fname = f"ref_{int(time.time() * 1000)}{ext}"
-        ASSETS.mkdir(parents=True, exist_ok=True)
-        (ASSETS / fname).write_bytes(raw)
 
         owner_id = int(body.get("owner_id") or 0)
         table = "personas" if kind == "persona_ref" else "characters"
