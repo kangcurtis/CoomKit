@@ -113,7 +113,7 @@
         <p>Nothing open. Drop a SillyTavern card into the roster on the left,
            then hit <b>chat</b>, or <b>💬</b> if you'd rather she texted you.</p>
         <p class="hint">Or don't. <button class="ghost-btn" id="btnPlainChat">just talk to the model</button><br>
-           No card, no roleplay — your preset, your jailbreak, your persona,
+           Using your preset, your jailbreak, your persona,
            and whatever's loaded.</p>
       </div>
     </div>
@@ -184,7 +184,7 @@
           <div class="block-head"><h3>Thinking</h3><span class="badge" id="thinkBadge">normal</span>
             <div class="spacer"></div>
             <button class="mini-btn" id="thinkSave" title="Write these into the active preset">save into preset</button></div>
-          <p class="hint">In-character thinking gives you her filthy inner monologue instead of an AI writing an essay about itself.</p>
+          <p class="hint">In-character thinking should give you her inner monologue. Tweak reasoning prefill as needed.</p>
           <label>style
             <select id="thinkMode">
               <option value="off">off</option>
@@ -285,7 +285,7 @@
       <div class="rail-pane" id="rail-studio">
         <div class="block">
           <div class="block-head"><h3>Make something</h3><span class="badge" id="studioBadge">—</span></div>
-          <p class="hint">Pick a shot. She drafts the prompt, you approve it, your GPU does the rest.</p>
+          <p class="hint">She drafts the prompt, you approve it, ComfyUI does the rest.</p>
           <div class="recipe-grid" id="recipeGrid"></div>
         </div>
         <div class="block" id="recipeOptsBlock" hidden>
@@ -299,7 +299,7 @@
         </div>
         <div class="block">
           <div class="block-head"><h3>GPU</h3><span class="badge" id="vramBadge">—</span></div>
-          <p class="hint" id="vramHint">One card, two tenants. CoomKit can park your chat model while a big render runs, then bring it straight back.</p>
+          <p class="hint" id="vramHint">CoomKit can park your chat model while a big render runs, then bring it straight back.</p>
           <label>when a job needs the room
             <select id="vramPolicy">
               <option value="off">off</option>
@@ -334,7 +334,7 @@
         </div>
         <div class="block">
           <div class="block-head"><h3>Quality</h3></div>
-          <p class="hint">Off is fast. Detailers and upscale are worth it for a keeper, not for every message.</p>
+          <p class="hint">Your immage model needs more?</p>
           <div id="stageToggles"></div>
         </div>
       </div>
@@ -356,7 +356,7 @@
       <div class="rail-pane" id="rail-media">
         <div class="block">
           <div class="block-head"><h3>ComfyUI</h3><span class="badge" id="comfyBadge">offline</span></div>
-          <p class="hint">Your box, your workflows. LAN is fine: point CoomKit at the machine with the GPU.</p>
+          <p class="hint">Your box, your workflows.</p>
           <input id="comfyUrl" placeholder="http://desktop.local:8188">
           <div class="row-btns">
             <button class="ghost-btn" id="comfySave">save</button>
@@ -636,7 +636,7 @@
       <button class="modal-tab" data-ftab="character">☆ a whole character</button>
       <button class="modal-tab" data-ftab="feel">📷 that feel</button>
       <button class="modal-tab" data-ftab="scene">✦ a scene</button>
-      <button class="modal-tab" data-ftab="you">👤 you</button>
+      <button class="modal-tab" data-ftab="you">👤 (you)</button>
     </div>
     <div class="modal-body">
 
@@ -795,9 +795,8 @@
       </div>
 
       <div class="modal-pane" id="ftab-character">
-      <p class="hint">Nine empty textareas is homework, and it shows in the
-        result. Describe what you want, or nothing at all, and she gets
-        invented around <b>you</b>: your persona, and what you put in
+      <p class="hint">Describe what you want, or nothing at all, and she gets
+        invented around <b>(you)</b>: your persona, and what you put in
         <i>what you're into</i>. Argue with the pitches until one is right,
         then commit and she gets a card, a pinned seed, a voice and a
         portrait.</p>
