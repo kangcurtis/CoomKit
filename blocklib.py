@@ -211,22 +211,10 @@ def library() -> list:
               content="Write four or more paragraphs, with room for "
                       "description and interiority."),
 
-        # ── POV / tense: exclusive ────────────────────────────────
-        block("lib.pov.third", "Third person", "style", exclusive="pov",
-              enabled=False,
-              why="'She leans in.' The default for most cards.",
-              content="Write in third person limited, from her perspective, "
-                      "present tense."),
-        block("lib.pov.second", "Second person", "style", exclusive="pov",
-              enabled=False,
-              why="'You feel her lean in.' More immediate, easier to break.",
-              content="Write in second person addressed to the user, present "
-                      "tense."),
-        block("lib.pov.first", "First person", "style", exclusive="pov",
-              enabled=False,
-              why="'I lean in.' She narrates herself.",
-              content="Write in first person as the character, present "
-                      "tense."),
+        # The POV radio group (lib.pov.*) moved into blocks.default_blocks()
+        # on 2026-08-20: buried in a library nobody opened, it read as "the
+        # model can't hold a POV" rather than as a setting. Same ids, so a
+        # preset that installed them from here keeps its stored copies.
 
         # ── content ───────────────────────────────────────────────
         block("lib.nsfw.on", "Explicit content", "content",

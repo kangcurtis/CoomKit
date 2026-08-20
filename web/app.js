@@ -326,47 +326,49 @@ async function loadConfig() {
 }
 
 // ── backends / models ────────────────────────────────────────────
+// The picker is a button + popover rather than a native <select> because a
+// llama-server started on a whole model folder serves dozens of models, and
+// a native dropdown cannot be filtered. Same rule as the wizard: past a
+// dozen, scrolling to find one is worse than typing three letters.
 let BACKENDS = [];
+let MODEL_OPTS = [];   // flat [{backend, model, label, remote, hay}]
+
 async function loadBackends(ui) {
   const { backends } = await api('/api/backends');
   BACKENDS = backends || [];
-  const sel = $('modelSel');
-  sel.innerHTML = '';
+  MODEL_OPTS = [];
   let firstLocal = null;
   for (const b of BACKENDS) {
-    const group = document.createElement('optgroup');
-    group.label = b.label + (b.remote ? ' (remote)' : '');
-    for (const m of b.models) {
-      const o = document.createElement('option');
-      o.value = JSON.stringify({ backend: b.url, model: m });
-      o.textContent = m.length > 42 ? m.slice(0, 40) + '…' : m;
-      group.appendChild(o);
-      if (!firstLocal && !b.remote) firstLocal = o.value;
+    for (const m of b.models || []) {
+      const o = { backend: b.url, model: m, remote: !!b.remote,
+                  label: b.label + (b.remote ? ' (remote)' : ''),
+                  hay: (m + ' ' + (b.label || b.url)).toLowerCase() };
+      MODEL_OPTS.push(o);
+      if (!firstLocal && !b.remote) firstLocal = o;
     }
-    if (b.models.length) sel.appendChild(group);
   }
-  if (!sel.options.length) {
-    sel.innerHTML = '<option value="">no models found</option>';
+  if (!MODEL_OPTS.length) {
+    $('modelBtn').textContent = 'no models found';
     setStatus('bad', 'no LLM backend');
+    renderBackendList();
     return;
   }
   // prefer the model the user was last on, if it is still being served
-  const want = (ui && ui.llm && ui.llm.model)
-    ? JSON.stringify({ backend: ui.llm.backend, model: ui.llm.model }) : '';
-  const known = want && [...sel.options].some((o) => o.value === want);
-  sel.value = known ? want : (firstLocal || sel.options[0].value);
-  applyModelSel();
-  sel.onchange = () => { applyModelSel(); saveUI(); };
+  const want = (ui && ui.llm && ui.llm.model) ? ui.llm : S.llm;
+  const match = want && want.model && MODEL_OPTS.find(
+    (o) => o.backend === want.backend && o.model === want.model);
+  setModel(match || firstLocal || MODEL_OPTS[0]);
   renderBackendList();
 }
-function applyModelSel() {
-  const v = $('modelSel').value;
-  if (!v) return;
-  const { backend, model } = JSON.parse(v);
-  S.llm = { backend, model };
-  const b = BACKENDS.find((x) => x.url === backend);
+
+function setModel(o, save) {
+  S.llm = { backend: o.backend, model: o.model };
+  const b = BACKENDS.find((x) => x.url === o.backend);
   const remote = !!(b && b.remote);
-  setStatus('ok', (b ? b.label : 'backend') + ' · ' + model.split('/').pop());
+  const btn = $('modelBtn');
+  btn.textContent = o.model.split('/').pop();
+  btn.title = o.model + ' — ' + (b ? b.label : o.backend);
+  setStatus('ok', (b ? b.label : 'backend') + ' · ' + o.model.split('/').pop());
   $('visionBadge').hidden = remote;
   // prefill semantics differ: local backends genuinely continue an assistant
   // turn; hosted APIs drop it, so we emulate via an instruction instead.
@@ -375,7 +377,85 @@ function applyModelSel() {
     ? 'Hosted APIs drop real prefills, so this is emulated as an instruction, softer, and she may drift from it.'
     : 'Put words in her mouth. She literally continues from here.';
   $('thinkPrefill').parentElement.style.opacity = remote ? .55 : 1;
+  if (save) saveUI();
 }
+
+// Restore the topbar status pill and badges for the current model — what
+// send() and rerollMsg() need after a stream replaces the pill with
+// "generating…". The old applyModelSel() did this by re-reading the select;
+// setModel with the current pick is the same refresh without the select.
+function refreshModelStatus() {
+  if (!S.llm || !S.llm.model) return;
+  setModel(MODEL_OPTS.find((o) => o.backend === S.llm.backend
+                                && o.model === S.llm.model)
+           || { backend: S.llm.backend, model: S.llm.model });
+}
+
+function renderModelPop() {
+  const q = ($('modelFind').value || '').trim().toLowerCase();
+  const list = $('modelList');
+  list.innerHTML = '';
+  let lastLabel = null;
+  let shown = 0;
+  for (const o of MODEL_OPTS) {
+    if (q && !o.hay.includes(q)) continue;
+    if (o.label !== lastLabel) {
+      const h = document.createElement('div');
+      h.className = 'model-pop-group';
+      h.textContent = o.label;
+      list.appendChild(h);
+      lastLabel = o.label;
+    }
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'model-pop-row'
+      + (S.llm && S.llm.backend === o.backend && S.llm.model === o.model
+         ? ' on' : '');
+    row.textContent = o.model;
+    row.title = o.model;
+    row.onclick = () => { setModel(o, true); closeModelPop(); };
+    list.appendChild(row);
+    shown++;
+  }
+  if (!shown) {
+    list.innerHTML = '<div class="model-pop-none">nothing matches</div>';
+  }
+}
+
+async function openModelPop() {
+  const pop = $('modelPop');
+  if (!pop.hidden) { closeModelPop(); return; }
+  // Re-probe when empty: the page may have loaded before the user's LLM
+  // server was up, and opening the picker is exactly when they expect a
+  // fresh look. Same behaviour pickModel() has always had.
+  if (!MODEL_OPTS.length) await loadBackends();
+  pop.hidden = false;
+  const find = $('modelFind');
+  find.value = '';
+  find.hidden = MODEL_OPTS.length <= 12;
+  renderModelPop();
+  if (!find.hidden) find.focus();
+}
+function closeModelPop() { $('modelPop').hidden = true; }
+$('modelBtn').onclick = (e) => { e.stopPropagation(); openModelPop(); };
+$('modelFind').oninput = renderModelPop;
+$('modelFind').onkeydown = (e) => {
+  if (e.key === 'Escape') { closeModelPop(); e.stopPropagation(); }
+  if (e.key === 'Enter') {
+    const r = $('modelList').querySelector('.model-pop-row');
+    if (r) r.click();
+  }
+};
+document.addEventListener('click', (e) => {
+  const pop = $('modelPop');
+  if (!pop.hidden && !pop.contains(e.target)) closeModelPop();
+});
+// Escape must close the popover even when the filter input is hidden (a
+// dozen models or fewer) or not focused — the input's own handler only
+// covers keystrokes landing in it.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('modelPop').hidden) closeModelPop();
+});
 function renderBackendList(remotes) {
   const ul = $('backendList');
   if (!ul) return;
@@ -1927,7 +2007,7 @@ async function send(regen = false) {
   S.attachments = []; renderAttachments();
   S.busy = false;
   $('btnSend').disabled = false;
-  applyModelSel();
+  refreshModelStatus();
   // The user may have opened another chat while she was writing — the reply
   // is stored under the chat it was sent from either way, but repainting
   // HERE would redraw whatever chat is now open and re-open ITS thought
@@ -2068,7 +2148,7 @@ async function rerollMsg(msgId, div, asId) {
   }
   S.busy = false;
   $('btnSend').disabled = false;
-  applyModelSel();
+  refreshModelStatus();
   // Same guard as send(): don't repaint a chat this re-roll doesn't belong to.
   if (!S.chat || S.chat.id !== body.chat_id) return;
   await loadChat();
@@ -4228,13 +4308,27 @@ async function loadBlocksFor(presetId) {
   const p = S.presets.find((x) => String(x.id) === String(presetId));
   if (!p) { $('blkList').innerHTML = '<p class="note">no preset selected</p>'; return; }
   S.blk.presetId = p.id;
+  // Mirror the server's blocks.merge(): built-ins the stored preset has
+  // never heard of are appended, disabled or not as they ship. The server
+  // already assembles that way (server.py, _prepare_request), so a panel
+  // painting the stored list verbatim was hiding blocks that were really in
+  // the prompt — a preset saved before the POV group shipped would simply
+  // never show it.
   S.blk.list = (p.data.blocks && p.data.blocks.length)
-    ? JSON.parse(JSON.stringify(p.data.blocks))
+    ? mergeBlocks(p.data.blocks, S.blk.cat.default)
     : JSON.parse(JSON.stringify(S.blk.cat.default));
   S.blk.dirty = false;
   $('blkContext').value = p.data.context
     || (S.cfg && S.cfg.defaults && S.cfg.defaults.context_tokens) || 8192;
   renderBlocks();
+}
+function mergeBlocks(stored, defaults) {
+  const out = JSON.parse(JSON.stringify(stored));
+  const seen = new Set(out.map((b) => b.id));
+  for (const d of defaults) {
+    if (!seen.has(d.id)) out.push(JSON.parse(JSON.stringify(d)));
+  }
+  return out;
 }
 $('blkContext').oninput = renderBlocks;
 $('blkCtxDetect').onclick = async () => {
@@ -4309,16 +4403,18 @@ function renderBlocks() {
   const box = $('blkList');
   box.innerHTML = '';
   const groups = S.blk.cat.groups;
-  const claimed = new Set();
   let total = 0;
 
-  // Exclusive shadowing is computed the same way the server does it, so the
-  // list shows what will actually be sent rather than what is ticked.
-  const shadowed = new Set();
+  // One exclusive name = ONE radio set, membered in whole-list order — the
+  // same order resolve_exclusive uses to pick which enabled member is
+  // actually sent. Clustered per display group instead, an imported preset
+  // whose "(Choose One)" members landed in different display groups painted
+  // two half-sets that could both show a checked radio — or an "off" saying
+  // nothing is sent while the other half was sending.
+  const exGroups = {};
   for (const b of S.blk.list) {
-    if (b.enabled && b.exclusive) {
-      if (claimed.has(b.exclusive)) shadowed.add(b.id);
-      else claimed.add(b.exclusive);
+    if (b.exclusive) {
+      (exGroups[b.exclusive] = exGroups[b.exclusive] || []).push(b);
     }
   }
 
@@ -4342,7 +4438,19 @@ function renderBlocks() {
         ? `<b>${esc(g.label)}</b>`
         : `<b>${esc(g.label)}</b><span>${esc(g.why)}</span>`;
       target.appendChild(head);
-      for (const b of mine) target.appendChild(blockRow(b, shadowed.has(b.id), compact));
+      // Blocks sharing an `exclusive` name are one choice, so they are
+      // painted as one radio set where the group's FIRST member (whole-list
+      // order) lives — checkboxes that secretly shadow each other is the
+      // exact ST failure blocks.py exists to not have.
+      for (const b of mine) {
+        if (b.exclusive) {
+          const members = exGroups[b.exclusive];
+          if (members[0] !== b) continue;
+          target.appendChild(exclusiveSet(b.exclusive, members, compact));
+          continue;
+        }
+        target.appendChild(blockRow(b, compact));
+      }
     }
   }
 
@@ -4375,10 +4483,44 @@ function renderBlocks() {
   if ($('blkSave')) $('blkSave').disabled = loose;
 }
 
-function blockRow(b, isShadowed, compact) {
+// Friendly names for the exclusive groups we ship. An imported preset can
+// carry any group name at all ("(Choose One)" headers become groups in
+// stimport), so anything unknown falls back to the raw name.
+const EX_LABELS = { pov: 'Point of view', length: 'Reply length' };
+let exSeq = 0;   // radio `name`s must be unique per painted set
+
+function exclusiveSet(exName, members, compact) {
+  const wrap = document.createElement('div');
+  wrap.className = 'blk-exset' + (compact ? ' tight' : '');
+  // The counter alone names the radio group: exName is user/import-supplied
+  // text and must never reach markup unescaped (uniqueness is all that
+  // matters here — membership is the closure's, not the attribute's).
+  const radio = `blk-ex-${++exSeq}`;
+  // Same rule as the server: the FIRST enabled member is the one sent.
+  const on = members.find((m) => m.enabled) || null;
+  const label = EX_LABELS[exName]
+    || exName.charAt(0).toUpperCase() + exName.slice(1);
+  const head = document.createElement('div');
+  head.className = 'blk-exhead';
+  head.innerHTML = `<b>${esc(label)}</b><span class="blk-tag ex">select one</span>
+    <label class="blk-exoff" title="none of these is sent — the card decides">
+      <input type="radio" name="${radio}"${on ? '' : ' checked'}> off</label>`;
+  head.querySelector('input').onchange = () => {
+    for (const x of S.blk.list) if (x.exclusive === exName) x.enabled = false;
+    S.blk.dirty = true;
+    renderBlocks();
+  };
+  wrap.appendChild(head);
+  for (const m of members) {
+    wrap.appendChild(blockRow(m, compact, { radio, checked: m === on }));
+  }
+  return wrap;
+}
+
+function blockRow(b, compact, ex) {
   const row = document.createElement('div');
   row.className = 'blk-row' + (b.enabled ? '' : ' off')
-    + (isShadowed ? ' shadow' : '') + (compact ? ' tight' : '');
+    + (compact ? ' tight' : '');
   row.draggable = !compact;
   row.dataset.id = b.id;
   const tok = blockTokens(b);
@@ -4387,17 +4529,17 @@ function blockRow(b, isShadowed, compact) {
   if (b.role && b.role !== 'system' && b.kind !== 'marker')
     tags.push(`<span class="blk-tag role">${esc(b.role)}</span>`);
   if (b.place === 'depth') tags.push(`<span class="blk-tag depth">depth ${b.depth}</span>`);
-  if (b.exclusive) tags.push(`<span class="blk-tag ex">${esc(b.exclusive)}</span>`);
+  // Inside a radio set the set's own header already says "select one".
+  if (b.exclusive && !ex) tags.push(`<span class="blk-tag ex">${esc(b.exclusive)}</span>`);
   if (b.builtin) tags.push('<span class="blk-tag built">built-in</span>');
   if ((b.models || []).length) tags.push(`<span class="blk-tag mod">${esc(b.models.join('/'))}</span>`);
 
   row.innerHTML = `
     ${compact ? '' : '<span class="blk-grip" title="drag to reorder">⠿</span>'}
-    <input type="checkbox" class="blk-on"${b.enabled ? ' checked' : ''}>
+    <input type="${ex ? 'radio' : 'checkbox'}" class="blk-on"${ex ? ` name="${ex.radio}"` : ''}${(ex ? ex.checked : b.enabled) ? ' checked' : ''}>
     <div class="blk-main">
       <div class="blk-name">${esc(b.name)}${tags.join('')}</div>
       ${b.why && !compact ? `<div class="blk-why">${esc(b.why)}</div>` : ''}
-      ${isShadowed ? '<div class="blk-why warn">another block in this group wins, so this one is not sent</div>' : ''}
     </div>
     <span class="blk-tok">${b.kind === 'marker' ? '·' : tok.toLocaleString()}</span>
     <button class="mini-btn blk-up" title="move up">↑</button>
@@ -4406,7 +4548,18 @@ function blockRow(b, isShadowed, compact) {
 
   const idx = () => S.blk.list.findIndex((x) => x.id === b.id);
   row.querySelector('.blk-on').onchange = (e) => {
-    b.enabled = e.target.checked; S.blk.dirty = true; renderBlocks();
+    if (ex) {
+      // Radio semantics across the WHOLE list, not just this painted set:
+      // an imported preset can scatter one exclusive group across display
+      // groups, and enabling here must still disable the copy over there —
+      // the server would only send the first anyway.
+      for (const x of S.blk.list) {
+        if (x.exclusive === b.exclusive) x.enabled = (x === b);
+      }
+    } else {
+      b.enabled = e.target.checked;
+    }
+    S.blk.dirty = true; renderBlocks();
   };
   row.querySelector('.blk-up').onclick = () => move(idx(), -1);
   row.querySelector('.blk-down').onclick = () => move(idx(), 1);
@@ -5627,9 +5780,13 @@ $('wizNext').onclick = async () => {
   const step = WIZ[S.wiz.step];
   if (step.id === 'brain') {
     if (!S.wiz.picked) { $('wizNote').textContent = 'pick one first'; return; }
-    S.llm = { backend: S.wiz.picked.backend, model: S.wiz.picked.model };
-    applyModelSel();
-    saveUI();
+    // Route through setModel: the old path set S.llm and then called
+    // applyModelSel(), which re-read the topbar select and silently put the
+    // pick back to whatever the select happened to hold.
+    setModel(MODEL_OPTS.find((o) => o.backend === S.wiz.picked.backend
+                                 && o.model === S.wiz.picked.model)
+             || { backend: S.wiz.picked.backend, model: S.wiz.picked.model },
+             true);
   }
   if (step.id === 'vram') {
     await post('/api/config', {

@@ -30,10 +30,23 @@ if missing:
     sys.exit(1)
 print(f"all {len(js_ids)} referenced ids exist ({len(html_ids)} in html)")
 
-# functions called but never defined (catches the openChatById class of bug)
-defined = set(re.findall(r"(?:async\s+)?function\s+(\w+)", js))
-defined |= set(re.findall(r"(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(", js))
-called = set(re.findall(r"\b(\w+)\(", js))
+# functions called but never defined (catches the openChatById class of bug).
+# Comments are stripped first: a deleted helper lingering in prose is not a
+# call, and it was exactly a comment mentioning applyModelSel() that made
+# this check un-hardenable before.
+scan = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
+scan = re.sub(r"^\s*//.*$", "", scan, flags=re.M)
+defined = set(re.findall(r"(?:async\s+)?function\s+(\w+)", scan))
+defined |= set(re.findall(r"(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(", scan))
+# Parameters count as defined — callbacks like tagChip(a, onRemove) call
+# their arguments. Scope-blind, which can only ever hide a bug whose name
+# collides with some parameter somewhere; it cannot invent one.
+for plist in re.findall(r"function\s+\w*\s*\(([^)]*)\)", scan):
+    defined |= set(re.findall(r"\w+", plist))
+for plist in re.findall(r"\(([^()]*)\)\s*=>", scan):
+    defined |= set(re.findall(r"\w+", plist))
+defined |= set(re.findall(r"(?<![\w.])(\w+)\s*=>", scan))
+called = set(re.findall(r"\b(\w+)\(", scan))
 builtins = {
     "if", "for", "while", "switch", "catch", "function", "return", "await",
     "typeof", "new", "fetch", "post", "api", "del", "esc", "fmt", "toast",
@@ -42,17 +55,27 @@ builtins = {
     "clearTimeout", "document", "window", "require", "Set", "Map", "isNaN",
     "encodeURIComponent", "decodeURIComponent", "TextDecoder", "FileReader",
     "URL", "confirm", "prompt", "$",
+    # browser globals and class syntax
+    "btoa", "atob", "setInterval", "clearInterval", "getComputedStyle",
+    "requestAnimationFrame", "structuredClone", "constructor", "super",
+    # words that read as calls inside UI strings — "merged 3 duplicate(s)"
+    "duplicate",
 }
 suspect = sorted(c for c in called - defined - builtins
                  if c[0].islower() and "_" not in c and len(c) > 3
-                 and f".{c}(" not in js and f"{c}:" not in js)
+                 and f".{c}(" not in scan and f"{c}:" not in scan)
 # only flag things that look like our own helpers
-ours = [s for s in suspect if re.search(rf"(?<![.\w]){s}\(", js)
-        and not re.search(rf"\b{s}\s*[:=]", js)]
+ours = [s for s in suspect if re.search(rf"(?<![.\w]){s}\(", scan)
+        and not re.search(rf"\b{s}\s*[:=]", scan)]
 if ours:
-    print("possibly undefined helpers:", ", ".join(ours))
-else:
-    print("no obviously undefined local helpers")
+    # A hard failure, not a note. This check spotted applyModelSel() still
+    # being called after the function was deleted (2026-08-20) — and the
+    # suite stayed green because this branch only printed. A refactor that
+    # deletes a helper but misses a call site is a ReferenceError on a hot
+    # path, which is exactly the class of bug a static pass exists to catch.
+    print("undefined helpers still called:", ", ".join(ours))
+    sys.exit(1)
+print("no obviously undefined local helpers")
 
 # every fetch path should be one the server routes
 paths = sorted(set(re.findall(r"['\"](/api/[a-z_/]+)", js)))

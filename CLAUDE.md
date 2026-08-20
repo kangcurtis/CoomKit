@@ -29,6 +29,15 @@ Code lives at the repo root — this repo *is* CoomKit.
 - **Frontend is vanilla JS/HTML/CSS with no build step.** `web/` is served
   directly. No bundler, no framework, no npm.
 - **Port 3939.** `./run.sh` starts, `./restart.sh` restarts via pidfile.
+  Windows users double-click `run.bat` — it must stay CRLF (`.gitattributes`
+  pins it; cmd.exe mis-parses multi-line blocks in LF-only files) and ASCII
+  (codepage roulette otherwise), and it ends in `pause` so a crash is
+  readable instead of a window that flashes and vanishes. It uses `pushd`,
+  not `cd /d`: cmd cannot make a UNC path current and a failed cd does not
+  stop a batch, so from a network share it would have started server.py out
+  of C:\Windows. The `if not exist server.py` check catches the other
+  silent wrong-directory case — double-clicking the .bat inside an
+  unextracted ZIP.
 - **Vision is local-only by construction.** If the selected backend is a
   configured remote, uploaded images are *not* sent — the model is told so
   in-band instead. Never weaken this without the user explicitly asking.
@@ -817,6 +826,70 @@ Two things this shook out, both of which were live:
   prompt cost 0% of context. `blockTokens` resolves the layer through
   `/api/prompts`. The two `__`-prefixed layers (jailbreak, card post-history)
   are genuinely unknown until send time and stay uncounted.
+
+**Exclusive groups render as ONE radio set with an explicit off** (2026-08-20,
+from "not getting POV consistency"). `resolve_exclusive` always had real
+select-one semantics — only the first enabled block in a group is sent — but
+the panel drew each member as an independent checkbox plus a "shadowed"
+warning, which is the exact ST failure the blocks.py docstring mocks. Now
+members of an `exclusive` group are painted as one boxed set (`exclusiveSet`
+in app.js): radio per member, an "off" radio meaning none-is-sent. **Both
+membership and the checked member are computed over the WHOLE list, never
+per display group** — stimport can land one "(Choose One)" run's members in
+different display groups, and the first cut clustered per group: two
+half-sets that could both show a checked radio, or an "off" claiming
+nothing is sent while the other half was sending. Whole-list order is the
+order `resolve_exclusive` uses, so the checked radio IS the block being
+sent. The radio's `name` attribute is a counter, never the group name —
+`exclusive` is user/import-supplied text and reached `innerHTML` unescaped
+in the first cut. The set is keyed off `b.exclusive` generically — imported
+groups get it for free; `EX_LABELS` maps the two shipped names to friendly
+labels. The old checkbox-plus-"shadowed"-warning rendering is gone with the
+state it warned about: the radio UI cannot express two-enabled, and a
+stored two-enabled preset shows checked on exactly the member being sent.
+
+**The POV trio lives in `default_blocks()`, off, under its old `lib.` ids.**
+It moved out of blocklib because a select buried in a library nobody opens
+reads as "the model can't hold a POV". The ids stay `lib.pov.*` on purpose:
+`merge()` dedups by id, so a preset that added them from the library keeps
+its stored copies instead of gaining twins. All three ship DISABLED — off
+means the card decides, and `test_cast`'s byte-identical baseline is the
+proof that a disabled block changes nothing. `test_blocks` pins all of it,
+including that the library and the defaults share no ids.
+
+**`loadBlocksFor` merges the way the server merges.** The panel used to paint
+a preset's stored `data.blocks` verbatim while the server assembled
+`blocks.merge(stored)` — so any built-in added after the preset was saved
+(the POV group, cast_absent before it) was really in the prompt but
+invisible in the panel, unfixable from the UI. `mergeBlocks` in app.js
+appends missing defaults exactly like `blocks.merge`, so the panel shows
+what is actually sent. Verified live: a pre-existing 3-block preset shows
+the POV set, undirtied, and picking first-person reaches the wire and is
+attributed to `lib.pov.first` in the inspector segments.
+
+**The model picker is a button + filterable popover, not a `<select>`.**
+A llama-server started on a whole model folder serves hundreds (421 on the
+dev machine with OpenRouter configured) and a native dropdown cannot be
+searched. Same rule as the wizard's model step: the filter input appears
+past a dozen models. `setModel(opt, save)` is the single apply path — the
+old shape was `S.llm = …; applyModelSel()`, and `applyModelSel` re-read the
+topbar select and silently put the pick back to whatever the select held,
+which is how the wizard's model choice could be discarded at finish.
+Opening the popover re-probes `/api/backends` when the list is empty, the
+same recovery `pickModel()` has always done. Escape closes it from a
+document-level handler, because the filter input (hidden at a dozen models
+or fewer) cannot be the only keyboard exit.
+
+Deleting `applyModelSel` left two callers standing — end of `send()` and
+end of `rerollMsg()` — so every completed turn threw ReferenceError,
+skipped the post-stream `loadChat()` repaint and left the status pill on
+"generating…". The suite stayed green because test_frontend's
+undefined-helper check only *printed*. Both are fixed: the call sites use
+`refreshModelStatus()` (setModel with the current pick), and **the
+undefined-helper check now fails the suite** — it strips comments first (a
+deleted helper lingering in prose is not a call) and counts function
+parameters as defined (callbacks like `tagChip(a, onRemove)` call their
+arguments), which is what made hardening it possible.
 
 **Provenance rides a SIDE CHANNEL, not the messages.** `blocks.render` tags
 each message with the block that produced it and `squash` merges the tags

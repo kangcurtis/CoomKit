@@ -9,7 +9,7 @@ Built as an alternative to SillyTavern for people who want something modern and
 less fiddly, without giving up control over the prompt.
 
 ```
-./run.sh          # http://127.0.0.1:3939
+./run.sh          # http://127.0.0.1:3939 — on Windows, double-click run.bat
 ```
 
 No install step. No dependencies. Python 3.10+ standard library and a folder of
@@ -187,7 +187,7 @@ honoured, so you're never guessing.
 ## Getting started
 
 1. Start your local model server (LM Studio, llama-server, whatever)
-2. `./run.sh`, open http://127.0.0.1:3939
+2. `./run.sh` (Windows: double-click `run.bat`), open http://127.0.0.1:3939
 3. The first-run wizard finds your model, pings your ComfyUI, and installs a
    starter prompt. Presets, jailbreaks and a persona are seeded automatically
    on an empty database — there is nothing to install by hand.

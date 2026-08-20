@@ -29,7 +29,13 @@
       <span class="dot" id="statusDot"></span>
       <span id="statusText">connecting…</span>
     </div>
-    <select id="modelSel" class="mini-select" title="Which brain is she running on?"></select>
+    <div class="model-pick">
+      <button id="modelBtn" class="model-btn" title="Which brain is she running on?">connecting…</button>
+      <div class="model-pop" id="modelPop" hidden>
+        <input type="search" id="modelFind" placeholder="filter models…" autocomplete="off">
+        <div class="model-pop-list" id="modelList"></div>
+      </div>
+    </div>
     <select id="presetSel" class="mini-select" title="Preset: sampling + jailbreak + thinking"></select>
     <button class="icon-btn" id="toggleLeft" title="Roster ([)">◧</button>
     <button class="icon-btn" id="toggleRight" title="Side panel (])">◨</button>

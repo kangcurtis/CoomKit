@@ -101,6 +101,42 @@ def default_blocks() -> list:
               layer="thinking_character", builtin=True,
               why="Her inner voice instead of an assistant analysing a task. "
                   "Only used when thinking style is 'in-character'."),
+        # ── point of view: a real radio group, off by default ─────
+        # Narration POV drifts over a long chat — the model slides between
+        # "She leans in", "You feel her lean in" and "I lean in" — and a
+        # card rarely pins it. These used to live in blocklib, where nobody
+        # found them; they are part of the default stack now so the select
+        # is always on screen. The ids keep the old `lib.` prefix on
+        # purpose: merge() dedups by id, so a preset that added them from
+        # the library keeps its stored copy instead of gaining twins.
+        # All three ship DISABLED — "off" means the card decides, and every
+        # existing prompt stays byte-identical until someone picks one.
+        block("lib.pov.third", "Third person", "style", exclusive="pov",
+              enabled=False, builtin=True,
+              why="'She leans in.' The default for most cards.",
+              content=(
+                  "Narrate in third person limited, from her perspective — "
+                  "'She leans in.' Every turn, the whole scene. Never slip "
+                  "into narrating as 'I', and never address the user as "
+                  "'you' outside her spoken dialogue.")),
+        block("lib.pov.second", "Second person", "style", exclusive="pov",
+              enabled=False, builtin=True,
+              why="'You feel her lean in.' More immediate, easier to break.",
+              content=(
+                  "Narrate in second person, addressed to the user — 'You "
+                  "feel her lean in.' Every turn, the whole scene: the "
+                  "narration calls the user 'you' and describes her in "
+                  "third person. Her spoken lines stay in her own voice "
+                  "inside quotes. Never drift into narrating her as 'I' or "
+                  "into plain third-person narration of the user.")),
+        block("lib.pov.first", "First person", "style", exclusive="pov",
+              enabled=False, builtin=True,
+              why="'I lean in.' She narrates herself.",
+              content=(
+                  "Narrate in first person as the character — 'I lean in.' "
+                  "Every turn, the whole scene: she tells it herself as "
+                  "'I', and the user is 'you'. Never drift into describing "
+                  "her own actions in third person.")),
         block("director", "Director's note", "steering", layer="director",
               builtin=True,
               why="Your stage direction, which she obeys without mentioning."),

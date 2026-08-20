@@ -38,6 +38,13 @@ check("every block declares a group",
       all(b["group"] for b in d))
 check("history comes before post-history",
       ids.index("history") < ids.index("post_history"))
+# The POV radio group ships in the default order so the select-one control is
+# always on screen — but OFF: "off" means the card decides, and every existing
+# prompt must stay byte-identical until somebody actually picks one.
+pov = [b for b in d if b.get("exclusive") == "pov"]
+check("the default order carries the POV radio group", len(pov) == 3)
+check("every POV block ships disabled", not any(b["enabled"] for b in pov))
+check("every POV block carries content", all(b["content"].strip() for b in pov))
 
 # ── 2. rendering ───────────────────────────────────────────────────
 print("\nrendering")
@@ -153,6 +160,10 @@ print("\nlibrary")
 lib = blocklib.library()
 check("library ids are unique",
       len({b["id"] for b in lib}) == len(lib))
+# The POV trio moved from the library into the defaults; an id in both places
+# would render twice in the UI and fight itself in merge().
+check("the library and the defaults share no ids",
+      not ({b["id"] for b in lib} & {b["id"] for b in blocks.default_blocks()}))
 check("every library block explains itself", all(b["why"] for b in lib))
 check("every library block has content or is a marker",
       all(b["content"].strip() or b["kind"] == "marker" for b in lib))

@@ -1,0 +1,3 @@
+# Batch files must reach a Windows checkout with CRLF endings — cmd.exe
+# mis-parses multi-line blocks in LF-only files.
+*.bat text eol=crlf
