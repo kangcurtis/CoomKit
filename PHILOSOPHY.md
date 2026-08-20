@@ -1,8 +1,6 @@
 # What CoomKit is for
 
-Read this before opening a PR. It is short on purpose. If a change disagrees
-with something here, that is a conversation worth having — but have it in the
-issue, not in the diff.
+We are AIchads: we ship fast, are agile, strong, fast, and a threat to all snailcats.
 
 ---
 
@@ -10,7 +8,7 @@ issue, not in the diff.
 
 CoomKit is built for the machine under your desk. Your models, your ComfyUI,
 your GPU, your files on your disk. Nothing phones home, nothing needs an
-account, and there is no hosted anything.
+account, and there is no hosted anything. Nothing ever goes to corpo or cloud unless our user tells it to.
 
 Cloud APIs are supported and they are **second-class citizens**, deliberately.
 They work, they are tested, and they will never be the reason a local feature
@@ -18,33 +16,34 @@ is compromised. When a design choice is better for a local backend and worse
 for a remote one, the local backend wins and the remote gets a badge in the UI
 explaining what it is missing. Reasoning prefill is the standing example: it is
 the strongest jailbreak vector we have, local backends genuinely continue a
-trailing assistant turn, and OpenRouter strips it server-side. So local gets
+trailing assistant turn, and OpenRouter strips it server-side for most providers. So local gets
 the real thing and remote gets an in-band request that says "emulated" on the
 screen. We did not weaken the local path to make the two match.
 
 The same rule decides the vision path: if the selected backend is a configured
-remote, your uploaded image is **not sent**. The model is told so in-band
-instead. That is not a limitation we are working around; it is the point.
+remote, your uploaded image is **not sent**. Yes, this software allows you to store your cock pic under your persona for reference, but it will never go to the cloud. 
+The model is told so in-band
+instead.
 
 ## Prompt blocks, not preset slop
 
 A preset is a list of toggleable blocks in a defined order. Each one says what
 it is, what it costs in tokens, and where it sits. You can reorder them, turn
-them off, and read the exact text of every single one — including the ones
+them off, and read the exact text of every single one, including the ones
 CoomKit injects on your behalf, which live in `prompts.py` and are all
 user-overridable.
 
 A jailbreak is one of those blocks. That is all it is.
 
 **Keep your cards. Leave the preset slop behind.** The 24,000-token JSON
-monsters people trade around are not prompts, they are sediment — a hundred
+monsters people trade around are not prompts, they are sediment: a hundred
 contradictory instructions nobody has read end to end, most of them fighting
 each other, kept because removing any one of them feels risky. We import them
 (`stimport`) and we will tell you what they cost, but the destination is a
-block list you can actually reason about, not a blob you paste and pray over.
+block list you can actually reason about, not a blob you paste in and hope will work with your corpo model.
 
 The inspector is the enforcement mechanism. There is **one** prompt-assembly
-path — `_prepare_request` → `assemble_blocks` — used by both the real send and
+path `_prepare_request` → `assemble_blocks` used by both the real send and
 the preview, so the inspector physically cannot show you something different
 from what gets sent. There is nothing to drift. Every line in the prompt names
 the block that produced it.
@@ -143,7 +142,7 @@ you.
 ## How we work
 
 Fast, strong, ship often. Small commits that each do one thing and explain
-**why** in the message — not what, the diff says what. If you found a landmine,
+**why** in the message not what, the diff says what. If you found a landmine,
 write it down where the next person will hit it.
 
 We are not snailcats. There is no roadmap committee, no RFC process and no
@@ -165,7 +164,4 @@ saved more time here than any amount of confidence would have.
 
 ## The one hard line
 
-Everything above is a preference. This is not: **nothing sexualising minors,
-ever** — in code, in shipped cards, in prompts, in art, in test fixtures, in
-example content. Any shipped character is an adult and reads unmistakably as
-one. PRs touching this are closed without discussion.
+Everything above is a preference. Nothing openly pornographic especially regarding minors or underage characters in ANY message, issue, PR, discussion. We are good and well behaved citizens of the Open Source community.

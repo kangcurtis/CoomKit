@@ -161,6 +161,48 @@ slower and greedier because the user asked for it. Consolidation merges a fat
 scope, and refuses any result that grew or that dropped most of the detail.
 `/api/memories/tidy` repairs data written before any of this existed.
 
+**In a cast scene, memory follows the SPEAKER, at every stage.** All measured
+leaks from one bug report, all easy to reintroduce:
+
+- **Injection**: `for_turn` is keyed on the turn's speaker, not the lead —
+  which is why the mems fetch in `_prepare_request` sits BELOW the speaker
+  resolution. Keyed on the lead, a guest's turn injected the lead's
+  relationship memories: one woman's history in another's mouth. Solo chats
+  are unchanged (the speaker IS the lead), except that ranking now sees the
+  pending user message too.
+- **Extraction**: `_extract_memories_bg` is handed
+  `meta["speaker_id"] or lead`, so a guest's reply files under HER record
+  (and her scope is the one consolidation checks). Before, the lead was
+  credited with every guest's facts and the guests stayed amnesiac.
+- **♥ remember** labels the transcript with who said each line (stamped
+  speaker, lead for unstamped — the same proof rule as the name-prefix gate)
+  and files each character-scope fact with the single cast member it names
+  (`memory.attribute_facts`; two names or zero falls to the lead, ambiguity
+  is never guessed at).
+- **The panel and manual writes**: `/api/chats/<id>/memories` unions the
+  guests' character scopes in (what the panel cannot show, the user cannot
+  edit), and `POST /api/memories` accepts a `character_id` validated against
+  the cast — an EDIT without one keeps the row's existing attribution, since
+  recomputing from the lead refiled a guest's memory on every edit.
+
+**The extractor is told the persona is already known, and its output is
+sanitised.** "The user's name is X" appeared as a memory before any in-scene
+introduction because the model read the name out of its own persona block and
+the extractor recorded the "discovery" — making every new character psychic.
+`memory.persona_known()` turns the persona into known-facts handed to the
+extractor; `memory.sanitize_facts()` is the belt: a user-scope fact
+restating the persona is DROPPED (naming-pattern check plus containment —
+symmetric Jaccard misses "is called X" vs "name is X" because the stems
+differ), and a user-scope fact naming the current character is DEMOTED to
+character scope, since a shared experience classified "user" follows the
+player into every other woman's chat. `memory.rescope_user_facts` (run by
+`/api/memories/tidy`) repairs rows written before the guard: a user-scope row
+naming exactly ONE known character becomes hers; two names is ambiguity and
+is left alone. Name matching is `memory._mentions` — whole-word for ASCII,
+substring for CJK, the same carve-out as the baton and the lorebooks.
+Deleting a character now also deletes her character-scope memories
+(`_character_delete`), which nothing could ever read again.
+
 **The character forge invents her, the scenario forge situates her.** Two
 tabs on the same modal, same interaction — pitch, argue in plain English,
 commit. `chargen.py` mirrors `scenarios.py` deliberately. Committing writes a
@@ -423,6 +465,22 @@ lost all my chats". Don't remove this in the name of saving a pragma read.
 reply and stores in `messages.data.director`. It never touches the prose.
 Gated on `director_notes` in the request body, so it is opt-in.
 
+**The director channel is SCENE FURNITURE and the client scopes it per chat.**
+It used to be one global `S.director` string, persisted in localStorage and
+sent whenever non-empty — stage direction typed once silently steered every
+later chat, every new chat, and (via `phoneRegen` borrowing `requestBody()`)
+the phone thread, surviving bar collapse and browser restarts. Now BOTH
+halves are gated on the bar being open (`S.directorOn && …` in
+`requestBody()`), and the text, the bar's open state and the `#sendAs` pick
+are all per-chat maps (`directorByChat` / `directorOnByChat` / `sendAsByChat`)
+swapped in by `openChatById`. Closing the bar takes the whole channel out of
+the context on the next turn; the text is kept for when it reopens. The phone
+paths strip `director`/`director_notes` through `phoneBody()` because
+`requestBody()` mirrors the MAIN chat while the phone overrides only
+`chat_id`. The old global `ui.director`/`ui.directorOn`/`ui.sendAs` keys are
+deliberately NOT migrated — they cannot be attributed to a chat, and a value
+following the user everywhere was the bug being fixed.
+
 **Session state lives in localStorage** under `coomkit.session.v1` — open
 chat, model, preset, samplers, thinking, rail tab, director state. The
 messages were always in sqlite; what was missing was the UI knowing which
@@ -496,6 +554,55 @@ guest off-stage takes the scene back to one speaker, which is exactly when the
 warning matters most: her lines are still in the history and the model will
 happily keep writing her. This was a real bug in the first cut — the layer
 never fired, because it was inside the multi branch.
+
+**…but it DECAYS.** The warning exists because her lines are close enough to
+imitate, so it fires only while a message stamped with her id sits inside the
+last `engine.CAST_ABSENT_WINDOW` (30) history messages. Unconditioned, one
+dismissed guest haunted every later turn of the chat forever — which a user
+reads, correctly, as "casting stays on after I dismissed her". The stamp is
+the right test: a guest's turns are always stamped (only the lead's greeting
+is not), and prose *mentions* of her are the dossier working, not a leak.
+
+**The stream announces the speaker before the first token.** The live bubble
+is built client-side with no speaker on it, so a cast reply used to stream in
+wearing the LEAD's name and face for its whole duration and only snap right
+on the post-stream reload — which reads as the wrong character answering, in
+the one window where the user is actually watching. `_chat_send` emits a
+`{"speaker": {id, name, avatar, reason}}` SSE frame before streaming;
+`applySpeaker` re-dresses the bubble. The avatar rides `meta["speaker_avatar"]`
+from `_prepare_request`, where the speaker's row is already in hand.
+
+**A speaker with no cast row gets a TOMBSTONE, not the lead's face.**
+`buildMsg` resolves each stamped reply's name and avatar out of the cast
+payload, and its fallback is the current chat's lead — so removing a cast
+member outright (`op: remove`, or deleting the character) silently
+re-attributed her every past message to the lead. `_chat_detail` now appends
+`tombstone: true` entries for stamped speaker ids missing from `chat_cast`,
+carrying the real name and avatar while the row still exists and "(gone)"
+after. Tombstones are lookup-only: `renderCast` skips them for chips, the
+strip-visibility count and the speaker dropdown ignore them.
+
+**A group chat is reachable from EVERYONE in it, and clicking a present guest
+hands her the turn.** `_chats_list` returns chats the character leads plus
+chats she is a present cast member of (`as_cast: true`, `with: <lead>`, and
+the macro expansion of those rows uses THAT chat's lead, not the list's
+character). Before this, the group scene existed only under its lead: from a
+guest's roster entry the UI silently opened a near-identical-looking solo
+chat, the reply landed there, and the conversation "spread out" — the
+reported bug. In the client, clicking a roster character who is PRESENT in
+the open scene sets `#sendAs` to her instead of navigating (click again to
+actually leave), and `loadChat` re-aligns `S.chat` to the chat's real lead
+when it was opened through a guest's list, because the header, the gallery,
+the memory panel and the unstamped-message fallback all key off the lead.
+`send()`/`rerollMsg` only repaint when the chat they were sent from is still
+the open one, so switching chats mid-stream cannot redraw the wrong view (the
+reply itself always stores under the chat_id the request carried — verified:
+no server path can store a reply anywhere else).
+
+**The cast picker is a searchable roster popover, not `prompt()`.** Built as
+elements rather than ids on purpose — dynamic ids are invisible to
+`tests/test_frontend.py`, so an id-based popover would be asserted against
+nothing.
 
 **The baton: who speaks next is decided before the turn, and says why.**
 `engine.pick_speaker` is six rules over data already in memory — a regex and a
@@ -1221,6 +1328,14 @@ tokens; the rest are offline or local-only.
   `blob:` SVG, `crossOrigin`, `image/webp`, a positioned serialise host, a
   missing C0 sanitiser, the animation override, and any `@media` rule touching
   the export's own elements. Offline and free.
+- `tests/test_memory_scope.py` pins memory scoping and the cast lifecycle
+  fixes: `_mentions`/`persona_known`/`sanitize_facts`/`attribute_facts`/
+  `rescope_user_facts` as pure functions, then through `/api/chats/preview`:
+  speaker-keyed injection (the guest's memories on her turn, never the
+  lead's), the panel union, guest-attributed manual writes surviving edits,
+  `cast_absent` firing fresh and decaying past the window, removal
+  tombstones, and a new chat carrying no cast or director layer. Offline and
+  free — the preview sends nothing.
 - `tests/test_studio.py` also guards the **bundled tag corpus**: every row must
   parse as `name,category,count` and no tag name may contain `", "`. That is
   not tidiness — it is what stops the author's private prompt library

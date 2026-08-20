@@ -1398,14 +1398,20 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "character_id required"}, 400)
             return
         mode = (q.get("mode") or ["rp"])[0]
+        # Chats she LEADS, plus chats she is merely IN. A group chat used to
+        # be listed only under its lead, so from a guest's side of the roster
+        # the scene you were "all together" in simply did not exist — which is
+        # how conversations got spread across near-identical-looking chats.
         sql = ("SELECT c.*,"
                " (SELECT COUNT(*) FROM messages m WHERE m.chat_id=c.id) AS n,"
                " (SELECT content FROM messages m WHERE m.chat_id=c.id"
                "   ORDER BY id DESC LIMIT 1) AS last,"
                " (SELECT content FROM messages m WHERE m.chat_id=c.id"
                "   AND m.role='user' ORDER BY id LIMIT 1) AS first_user"
-               " FROM chats c WHERE c.character_id=?")
-        args = [int(char_id)]
+               " FROM chats c WHERE (c.character_id=?"
+               "   OR c.id IN (SELECT chat_id FROM chat_cast"
+               "               WHERE character_id=? AND present=1))")
+        args = [int(char_id), int(char_id)]
         if mode != "all":
             sql += " AND c.mode=?"
             args.append(mode)
@@ -1418,11 +1424,20 @@ class Handler(BaseHTTPRequestHandler):
 
         out = []
         for r in rows:
+            # A cast chat's macros belong to ITS lead, not to the character
+            # whose list this is — {{char}} in a snippet must name the woman
+            # who actually said it.
+            as_cast = r["character_id"] != int(char_id)
+            lead = (rows_get("characters", r["character_id"]) or {}
+                    ) if as_cast else (char or {})
+            lead_name = lead.get("name") or char_name
+            lead_fields = lead.get("data", {}).get("fields", {}) \
+                if as_cast else cfields
+
             # Stored with {{user}} intact so the log stays portable — so the
             # display side has to expand, exactly as _chat_detail does.
-            def mx(t, cid=r["id"]):
-                return macros.expand(t or "", char_name, "anon", cfields,
-                                     "", str(cid))
+            def mx(t, cid=r["id"], nm=lead_name, fl=lead_fields):
+                return macros.expand(t or "", nm, "anon", fl, "", str(cid))
             out.append({
                 "id": r["id"], "mode": r["mode"],
                 "title": mx(chat_label(r)),
@@ -1430,6 +1445,10 @@ class Handler(BaseHTTPRequestHandler):
                 "messages": r["n"], "snippet": mx(r.get("last") or "")[:120],
                 "persona_id": r["persona_id"],
                 "has_scenario": bool((r.get("data") or {}).get("scenario")),
+                # She is in it but does not lead it. The client badges these
+                # so a group scene is distinguishable from a solo chat.
+                "as_cast": as_cast,
+                "with": lead_name if as_cast else "",
                 "created": r["created"], "updated": r["updated"],
             })
         self._json({"chats": out})
@@ -1603,6 +1622,23 @@ class Handler(BaseHTTPRequestHandler):
             c["char"] = crow
             cast_out.append({**c, "name": crow.get("name") or "(gone)",
                              "avatar": crow.get("avatar", "")})
+        # Tombstones: someone whose stamped lines are still in this log but
+        # who has no chat_cast row any more (removed outright, or her
+        # character deleted). The client resolves each reply's name and face
+        # out of this list, so without a tombstone her old messages silently
+        # re-attribute to the LEAD on every render — the wrong-name-and-pic
+        # bug, in its stored-history form. present=False keeps her out of the
+        # chips and the speaker dropdown; only the lookup gains her.
+        known_ids = {c["character_id"] for c in cast_rows}
+        for sid in {m.get("speaker") for m in out} - {None}:
+            if sid in known_ids:
+                continue
+            crow = rows_get("characters", sid) or {}
+            cast_out.append({"character_id": sid, "present": False,
+                             "ord": 999, "lead": False, "note": "",
+                             "tombstone": True,
+                             "name": crow.get("name") or "(gone)",
+                             "avatar": crow.get("avatar", "")})
         # Who `auto` would hand the turn to if you sent right now. The SAME
         # pure function the send uses, so the rules cannot drift — but with no
         # typed text yet, so "asked directly" cannot be evaluated and the
@@ -1715,19 +1751,9 @@ class Handler(BaseHTTPRequestHandler):
                 char = {"id": None, "name": "", "data": {"fields": {}}}
             persona = (rows_get("personas", chat_row["persona_id"])
                        if chat_row["persona_id"] else None)
+            # Memories are fetched AFTER the speaker is resolved (below) —
+            # they are hers, not the lead's.
             mems = []
-            if chat_row["memory_enabled"]:
-                # Ranked against what is actually being said and capped, so
-                # the memory block stops growing without bound. Unbounded it
-                # reached 897 tokens per turn on a 155-message log.
-                recent = " ".join(
-                    m["content"] for m in
-                    engine.get_messages(conn, chat_id)[-6:])
-                mems = [f"({m['kind']}) {m['content']}" for m in
-                        memory.for_turn(conn, chat_id,
-                                        chat_row["character_id"],
-                                        recent_text=recent,
-                                        limits=memory.settings(load_config()))]
 
             regenerate = bool(body.get("regenerate"))
             stored: list[str] = []
@@ -1898,6 +1924,10 @@ class Handler(BaseHTTPRequestHandler):
                 meta["speaker_id"] = speaker_id
                 meta["speaker"] = speaker_name
                 meta["speaker_reason"] = speaker_reason
+                # For the SSE speaker frame: the client dresses the live
+                # bubble as whoever is writing BEFORE the first token, so a
+                # cast reply does not stream in under the lead's face.
+                meta["speaker_avatar"] = spk["char"].get("avatar", "")
                 meta["cast"] = [c["char"]["name"] for c in here]
 
                 # Stop sequences — the one anti-merge layer that WORKS,
@@ -1939,10 +1969,41 @@ class Handler(BaseHTTPRequestHandler):
             # moment this warning matters most: her lines are still in the
             # history and the model will happily keep writing her. A chat that
             # never had a cast has no absent rows and so sees nothing.
-            gone = [c["char"]["name"] for c in cast if not c["present"]]
+            #
+            # But it DECAYS. The warning exists because her lines are still
+            # close enough for the model to imitate — so it fires only while
+            # a message she wrote (stamped with her id) is inside the recent
+            # window. Unconditioned, one dismissed guest haunted the prompt
+            # of that chat forever, which read as "casting stays on after I
+            # dismissed her".
+            recent_speakers = {engine.take_speaker(m)
+                               for m in history[-engine.CAST_ABSENT_WINDOW:]}
+            gone = [c["char"]["name"] for c in cast
+                    if not c["present"]
+                    and c["character_id"] in recent_speakers]
             layers["cast_absent"] = (
                 prompts.get("cast_absent", absent=", ".join(gone))
                 if gone else "")
+
+            if chat_row["memory_enabled"]:
+                # Ranked against what is actually being said and capped, so
+                # the memory block stops growing without bound. Unbounded it
+                # reached 897 tokens per turn on a 155-message log.
+                #
+                # Keyed on the SPEAKER in a cast scene, which is why this sits
+                # below the speaker resolution: memory.for_turn is user ∪
+                # character(her) ∪ chat, and handing the turn's writer the
+                # LEAD's relationship memories put one woman's history in
+                # another's mouth — the exact leak the character scope exists
+                # to prevent. Solo chats are unchanged: the speaker IS the
+                # lead. `history` already carries the pending user turn, so
+                # relevance ranking sees what was just typed too.
+                mem_char = speaker_id if multi else chat_row["character_id"]
+                recent = " ".join(m["content"] for m in history[-6:])
+                mems = [f"({m['kind']}) {m['content']}" for m in
+                        memory.for_turn(conn, chat_id, mem_char,
+                                        recent_text=recent,
+                                        limits=memory.settings(load_config()))]
 
             block_list = blocks.merge((preset.get("data") or {}).get("blocks"))
             # The history budget is computed against this. It was never passed
@@ -2187,6 +2248,16 @@ class Handler(BaseHTTPRequestHandler):
                             + ", ".join(meta["stop_dropped"])
                             + " did not fit — she may write for them"})
 
+        # Who is writing, announced BEFORE the first token. The live bubble is
+        # built client-side with no speaker on it, so without this frame a
+        # cast reply streamed in wearing the LEAD's name and face for its
+        # whole duration and only snapped right on the reload afterwards.
+        if meta.get("speaker_id"):
+            send({"speaker": {"id": meta["speaker_id"],
+                              "name": meta.get("speaker", ""),
+                              "avatar": meta.get("speaker_avatar", ""),
+                              "reason": meta.get("speaker_reason", "")}})
+
         reply_parts, think_parts = [], []
         try:
             for kind, chunk_text in llm.stream(
@@ -2346,8 +2417,15 @@ class Handler(BaseHTTPRequestHandler):
                     "SELECT count(*) FROM messages WHERE chat_id=?"
                     " AND role='assistant'", (chat_id,)).fetchone()[0]
             if memory.should_extract(turns, mem_cfg["every_n_turns"]):
+                # Attributed to the SPEAKER of the reply being read, not the
+                # chat's lead. In a cast scene the lead was credited with
+                # every guest's relationship — facts about one woman filed
+                # under another, then injected as the second one's own
+                # memories on her later turns.
                 self._extract_memories_bg(
-                    chat_id, chat_row["character_id"], body.get("text", ""),
+                    chat_id,
+                    meta.get("speaker_id") or chat_row["character_id"],
+                    body.get("text", ""),
                     visible, backend, key, model, meta)
 
     def _extract_memories_bg(self, chat_id, character_id, last_user,
@@ -2357,6 +2435,29 @@ class Handler(BaseHTTPRequestHandler):
                 with get_db() as conn:
                     existing = [m["content"] for m in
                                 memory.for_turn(conn, chat_id, character_id)]
+                    # The persona is ALREADY KNOWN — it is injected into every
+                    # prompt, so the model "discovering" the user's name in a
+                    # reply is it reading its own system prompt back. Handed
+                    # to the extractor as existing knowledge so it is never
+                    # recorded as a memory; memory.sanitize_facts below is the
+                    # belt for an extractor that records it anyway.
+                    prow = conn.execute(
+                        "SELECT p.name, p.data FROM personas p"
+                        " JOIN chats c ON c.persona_id = p.id"
+                        " WHERE c.id=?", (chat_id,)).fetchone()
+                    crow = conn.execute(
+                        "SELECT name FROM characters WHERE id=?",
+                        (character_id,)).fetchone()
+                persona_name, persona_desc = "", ""
+                if prow:
+                    persona_name = prow["name"] or ""
+                    try:
+                        persona_desc = (json.loads(prow["data"] or "{}")
+                                        .get("description") or "")
+                    except json.JSONDecodeError:
+                        pass
+                char_name = (crow["name"] if crow else "") or ""
+                known = memory.persona_known(persona_name, persona_desc)
 
                 def llm_once(msgs):
                     payload = llm.build_payload(
@@ -2364,9 +2465,12 @@ class Handler(BaseHTTPRequestHandler):
                         stream=False)
                     return llm.once_retry(backend, key, payload, "chat")
                 facts = memory.extract_memories(
-                    llm_once, existing, last_user, last_reply,
+                    llm_once, known + existing, last_user, last_reply,
                     system=prompts.get("memory_extract"))
                 cfg = memory.settings(load_config())
+                facts = memory.sanitize_facts(
+                    facts, persona_name, persona_desc, char_name,
+                    cfg["dupe_threshold"])
                 if facts:
                     with get_db() as conn:
                         memory.store_memories(conn, chat_id, character_id,
@@ -2746,6 +2850,12 @@ class Handler(BaseHTTPRequestHandler):
                          (char_id,))
             conn.execute("DELETE FROM chat_cast WHERE character_id=?",
                          (char_id,))
+            # Her relationship record goes with her. Character-scope rows for
+            # a deleted character are invisible to every read path and were
+            # accumulating forever. Chat-scope rows survive: they belong to
+            # the chat, which has its own delete discipline.
+            conn.execute("DELETE FROM memories WHERE kind='character'"
+                         " AND character_id=?", (char_id,))
         rows_delete("characters", char_id)
         self._json({"ok": True})
 
@@ -2814,6 +2924,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "chat not found"}, 404)
                 return
             mems = memory.for_turn(conn, chat_id, row["character_id"])
+            # The whole scene's memory, not just the lead's. Each guest keeps
+            # her own relationship record now, and what the panel cannot show
+            # the user cannot see or edit.
+            guests = [r["character_id"] for r in conn.execute(
+                "SELECT character_id FROM chat_cast WHERE chat_id=?",
+                (chat_id,)) if r["character_id"] != row["character_id"]]
+            if guests:
+                marks = ",".join("?" * len(guests))
+                mems += [dict(r) for r in conn.execute(
+                    f"SELECT * FROM memories WHERE kind='character'"
+                    f" AND character_id IN ({marks}) ORDER BY id", guests)]
         grouped = {"user": [], "character": [], "chat": []}
         for m in mems:
             grouped.setdefault(m["kind"], []).append(
@@ -2825,7 +2946,14 @@ class Handler(BaseHTTPRequestHandler):
     def _memory_write(self) -> None:
         """POST /api/memories — manual add or edit. The user owns their profile.
 
-        Body: {id?, scope: user|character|chat, content, chat_id?}
+        Body: {id?, scope: user|character|chat, content, chat_id?,
+               character_id?}
+
+        `character_id` may name a GUEST of the chat, so a memory can be
+        attached to whoever actually experienced it; it is validated against
+        the chat's cast plus its lead. An EDIT without one keeps the row's
+        existing attribution — recomputing it from the chat's lead silently
+        refiled a guest's memory under the lead on every edit.
         """
         body = self._body()
         content = (body.get("content") or "").strip()
@@ -2834,13 +2962,25 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "content required"}, 400)
             return
         chat_id = int(body.get("chat_id") or 0) or None
-        character_id = None
-        if scope != "user" and chat_id:
-            with get_db() as conn:
+        character_id = int(body.get("character_id") or 0) or None
+        with get_db() as conn:
+            if character_id and chat_id and scope != "user":
+                in_scene = conn.execute(
+                    "SELECT 1 FROM chats WHERE id=? AND character_id=?",
+                    (chat_id, character_id)).fetchone() or conn.execute(
+                    "SELECT 1 FROM chat_cast WHERE chat_id=? AND"
+                    " character_id=?", (chat_id, character_id)).fetchone()
+                if not in_scene:
+                    character_id = None
+            if not character_id and scope != "user" and body.get("id"):
+                old = conn.execute(
+                    "SELECT character_id FROM memories WHERE id=?",
+                    (int(body["id"]),)).fetchone()
+                character_id = old["character_id"] if old else None
+            if not character_id and scope != "user" and chat_id:
                 row = conn.execute("SELECT character_id FROM chats WHERE id=?",
                                    (chat_id,)).fetchone()
                 character_id = row["character_id"] if row else None
-        with get_db() as conn:
             mem_id = memory.upsert(conn, body.get("id"), scope, content,
                                    chat_id, character_id)
         self._json({"ok": True, "id": mem_id, "scope": scope})
@@ -3024,11 +3164,31 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         char = rows_get("characters", chat["character_id"]) or {}
+        # Everyone who is or was in the scene, for two jobs below: labelling
+        # the transcript with who actually said each line (a cast scene's
+        # transcript that just says "assistant:" makes every guest's deed
+        # read as the lead's), and filing each extracted relationship fact
+        # with the woman it names instead of unconditionally under the lead.
+        with get_db() as conn:
+            cast_rows = engine.cast_of(conn, chat_id, chat["character_id"])
+        members = []
+        for c in cast_rows:
+            row = rows_get("characters", c["character_id"]) or {}
+            if row.get("name"):
+                members.append((c["character_id"], row["name"]))
+        member_names = dict(members)
+
+        def who_said(m):
+            if m["role"] != "assistant":
+                return "user"
+            sid = engine.take_speaker(m)
+            return member_names.get(sid) or char.get("name") or "her"
+
         # The whole scene, trimmed from the end — the recent half of a long
         # evening is the half worth keeping.
         transcript, used = [], 0
         for m in reversed(msgs):
-            line = f"{m['role']}: {m['content']}"
+            line = f"{who_said(m)}: {m['content']}"
             cost = engine.rough_tokens(line)
             if used + cost > 6000 and transcript:
                 break
@@ -3042,16 +3202,38 @@ class Handler(BaseHTTPRequestHandler):
                 stream=False)
             return llm.once_retry(backend, key, payload, "chat")
 
+        # Same persona guard as the automatic pass: ♥ remember is greedier by
+        # design, which makes it MORE likely to file "the user is called X"
+        # from the persona block as a discovery.
+        persona = (rows_get("personas", chat["persona_id"])
+                   if chat["persona_id"] else None) or {}
+        known = memory.persona_known(
+            persona.get("name", ""),
+            persona.get("data", {}).get("description", ""))
         facts = memory.extract_memories(
-            llm_once, existing, "\n".join(transcript),
+            llm_once, known + existing, "\n".join(transcript),
             f"(the whole scene between {char.get('name', 'her')} and the user)",
             system=prompts.get("memory_remember"))
         cfg = memory.settings(load_config())
+        facts = memory.sanitize_facts(
+            facts, persona.get("name", ""),
+            persona.get("data", {}).get("description", ""),
+            char.get("name", ""), cfg["dupe_threshold"])
+        found = len(facts)
         with get_db() as conn:
-            added = memory.store_memories(conn, chat_id, chat["character_id"],
-                                          facts, cfg["dupe_threshold"])
-        self._json({"ok": True, "added": added, "found": len(facts),
-                    "duplicates": len(facts) - added})
+            added = 0
+            if len(members) > 1:
+                # A cast scene: each relationship fact goes to the woman it
+                # names, and only the unattributable remainder to the lead.
+                buckets, facts = memory.attribute_facts(facts, members)
+                for cid, fs in buckets.items():
+                    added += memory.store_memories(conn, chat_id, cid, fs,
+                                                   cfg["dupe_threshold"])
+            added += memory.store_memories(conn, chat_id,
+                                           chat["character_id"],
+                                           facts, cfg["dupe_threshold"])
+        self._json({"ok": True, "added": added, "found": found,
+                    "duplicates": found - added})
 
     def _memory_tidy(self) -> None:
         """POST /api/memories/tidy — collapse near-duplicates already stored.
@@ -3063,8 +3245,15 @@ class Handler(BaseHTTPRequestHandler):
         with get_db() as conn:
             before = conn.execute("SELECT count(*) FROM memories").fetchone()[0]
             result = memory.dedupe_existing(conn, cfg["dupe_threshold"])
+            # Repair scope leaks written before sanitize_facts existed: a
+            # user-scope fact that is visibly about exactly one character
+            # becomes hers, instead of following the player into every chat.
+            chars = [(r["id"], r["name"]) for r in conn.execute(
+                "SELECT id, name FROM characters").fetchall()]
+            rescoped = memory.rescope_user_facts(conn, chars)
             after = conn.execute("SELECT count(*) FROM memories").fetchone()[0]
-        self._json({"ok": True, "before": before, "after": after, **result})
+        self._json({"ok": True, "before": before, "after": after,
+                    "rescoped": rescoped, **result})
 
     def _memory_delete(self, mem_id: int) -> None:
         with get_db() as conn:

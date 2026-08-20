@@ -131,9 +131,18 @@ const S = {
   llm: { backend: '', model: '' },
   presetId: '',
   attachments: [],     // [{name, b64, dataUrl}]
-  director: '',
-  directorOn: false,   // bar open at all
+  director: '',        // the OPEN chat's stage direction (mirror of the map)
+  directorByChat: {},  // chat_id -> direction text. Stage direction is scene
+                       // furniture: one global string followed the user into
+                       // every chat they opened, forever, silently.
+  directorOn: false,       // bar open for the OPEN chat (mirror of the map)
+  directorOnByChat: {},    // chat_id -> bar open. Also scene furniture: a
+                           // globally-open bar injected the director channel
+                           // into every chat, not the one being directed.
   directorNotes: true, // …and she answers in the same channel
+  sendAs: 'auto',      // the OPEN chat's forced speaker (mirror of the map)
+  sendAsByChat: {},    // chat_id -> pick. A global pick forced the same
+                       // character in every multi chat, labelled "you".
   tools: true,
   busy: false,
   chatsByChar: {},     // "charId:mode" -> chat_id (so switching back resumes)
@@ -162,9 +171,10 @@ function saveUI() {
       persona: $('personaSel').value,
       tools: S.tools,
       rail: (document.querySelector('.rail-tab.on') || {}).dataset?.rail || 'scene',
-      directorOn: S.directorOn,
+      directorOnByChat: S.directorOnByChat,
       directorNotes: S.directorNotes,
-      director: S.director,
+      directorByChat: S.directorByChat,
+      sendAsByChat: S.sendAsByChat,
       thinkMode: $('thinkMode').value,
       rosterSort: $('rosterSort').value,
       thinkPrefill: $('thinkPrefill').value,
@@ -254,15 +264,16 @@ function restoreUI(ui) {
     const tab = document.querySelector(`.rail-tab[data-rail="${ui.rail}"]`);
     if (tab) tab.click();
   }
-  if (ui.director) { S.director = ui.director; $('directorInput').value = ui.director; }
+  // Per chat, not one global string. The old `ui.director` / `ui.directorOn`
+  // / `ui.sendAs` are deliberately NOT migrated: they cannot be attributed to
+  // a chat, and one global value silently following the user into every
+  // scene was the bug being fixed. The bar's visibility, its text and the
+  // forced speaker are all restored when a chat opens, from its own entry.
+  S.directorByChat = ui.directorByChat || {};
+  S.directorOnByChat = ui.directorOnByChat || {};
+  S.sendAsByChat = ui.sendAsByChat || {};
   S.directorNotes = ui.directorNotes !== false;
   $('directorNotes').checked = S.directorNotes;
-  S.sendAs = ui.sendAs || 'auto';
-  if (ui.directorOn) {
-    S.directorOn = true;
-    $('directorBar').hidden = false;
-    $('btnDirector').classList.add('on');
-  }
   updateSamplerSummary();
 }
 
@@ -1245,6 +1256,23 @@ async function openChat(charId, mode = 'rp') {
   const c = typeof charId === 'object' ? charId
                                        : S.chars.find((x) => x.id === charId);
   if (!c) return;
+  // She is already in the open scene. Navigating to her own solo chat here is
+  // how group conversations got spread across chat instances — the user
+  // clicks the character they want to speak next, the UI silently swaps to a
+  // different chat that looks the same, and the reply lands there. Clicking
+  // someone who is present hands her the turn instead.
+  if (mode === 'rp' && S.chat && S.chat.mode === 'rp'
+      && (S.cast || []).some((x) => x.present && !x.lead
+                                    && String(x.character_id) === String(c.id))
+      && S.sendAs !== String(c.id)) {
+    S.sendAs = String(c.id);
+    S.sendAsByChat[S.chat.id] = S.sendAs;
+    $('sendAs').value = S.sendAs;
+    saveUI();
+    toast(`${c.name} is already in this scene — she answers next. `
+          + `click her again if you really want her own separate chat`);
+    return;
+  }
   const key = c.id + ':' + mode;
   let chatId = S.chatsByChar[key];
   // chatsByChar is a last-opened CACHE, not the truth. It used to be the only
@@ -1306,7 +1334,8 @@ async function loadChatList() {
     const tEl = li.querySelector('.chat-title');
     tEl.textContent = row.title;
     li.querySelector('.chat-meta').textContent =
-      `${row.messages} msg · ${ago(row.updated)}${row.has_scenario ? ' · forged' : ''}`;
+      `${row.messages} msg · ${ago(row.updated)}${row.has_scenario ? ' · forged' : ''}`
+      + (row.as_cast ? ` · in ${row.with}'s scene` : '');
     li.querySelector('.chat-main').onclick = () => {
       if (row.id === S.chat.id) return;
       const c = S.chars.find((x) => x.id === S.chat.charId);
@@ -1419,6 +1448,17 @@ async function openChatById(c, chatId, mode) {
   // Keyed on the character, so a plain chat has nothing to remember it by —
   // it is reopened from the chat list like any other.
   if (!plain) S.chatsByChar[c.id + ':' + mode] = chatId;
+  // The director channel belongs to the scene it was opened over. Switching
+  // chats swaps the bar's text, its open/closed state AND the forced-speaker
+  // pick for this chat's own (usually: closed, empty, auto) — so direction
+  // typed in one adventure cannot silently steer another, and an open bar in
+  // one scene does not inject the note channel everywhere.
+  S.director = S.directorByChat[chatId] || '';
+  $('directorInput').value = S.director;
+  S.directorOn = !!S.directorOnByChat[chatId];
+  $('directorBar').hidden = !S.directorOn;
+  $('btnDirector').classList.toggle('on', S.directorOn);
+  S.sendAs = S.sendAsByChat[chatId] || 'auto';
   saveUI();
   loadChars();
   await loadChat();
@@ -1433,6 +1473,30 @@ async function loadChat() {
   if (!d || d.error || !Array.isArray(d.messages)) {
     $('chatSub').textContent = 'chat missing (db reset?). start a new one';
     return;
+  }
+  // A chat can now be reached from a GUEST's chat list, so the identity the
+  // caller passed may be the guest's. The chat's lead is what the header,
+  // the unstamped-message fallback, the gallery and the memory panel key
+  // off — realign to the server's answer rather than trusting the door the
+  // user came in through.
+  if (!S.chat.plain && d.chat && d.chat.character_id
+      && d.chat.character_id !== S.chat.charId) {
+    S.chat.charId = d.chat.character_id;
+    S.chat.name = d.character || S.chat.name;
+    S.chat.avatar = d.avatar || '';
+    $('chatWho').textContent = S.chat.name;
+    $('herName').textContent = S.chat.name;
+    if (S.chat.avatar) {
+      $('herImg').src = '/api/avatars/' + S.chat.avatar;
+      $('herImg').hidden = false;
+      $('herNoAva').hidden = true;
+      $('chatAva').innerHTML = `<img src="/api/avatars/${S.chat.avatar}" `
+        + 'style="width:100%;height:100%;object-fit:cover;border-radius:9px">';
+    }
+    saveUI();
+    loadChatList();
+    loadMemories();
+    loadGallery();
   }
   // BEFORE the render loop, not after. buildMsg resolves each reply's face,
   // name and reason out of S.cast, so assigning it afterwards meant the first
@@ -1794,10 +1858,21 @@ $('btnDirector').onclick = () => {
   S.directorOn = bar.hidden;          // about to become visible?
   bar.hidden = !S.directorOn;
   $('btnDirector').classList.toggle('on', S.directorOn);
+  if (S.chat) {
+    if (S.directorOn) S.directorOnByChat[S.chat.id] = true;
+    else delete S.directorOnByChat[S.chat.id];
+  }
   if (S.directorOn) $('directorInput').focus();
   saveUI();
 };
-$('directorInput').oninput = (e) => { S.director = e.target.value.trim(); saveUI(); };
+$('directorInput').oninput = (e) => {
+  S.director = e.target.value.trim();
+  if (S.chat) {
+    if (S.director) S.directorByChat[S.chat.id] = S.director;
+    else delete S.directorByChat[S.chat.id];
+  }
+  saveUI();
+};
 $('directorNotes').onchange = (e) => {
   S.directorNotes = e.target.checked;
   if (!S.directorNotes) showDirectorNote('');
@@ -1806,6 +1881,7 @@ $('directorNotes').onchange = (e) => {
 $('directorClear').onclick = () => {
   $('directorInput').value = '';
   S.director = '';
+  if (S.chat) delete S.directorByChat[S.chat.id];
   showDirectorNote('');
   saveUI();
 };
@@ -1852,12 +1928,43 @@ async function send(regen = false) {
   S.busy = false;
   $('btnSend').disabled = false;
   applyModelSel();
+  // The user may have opened another chat while she was writing — the reply
+  // is stored under the chat it was sent from either way, but repainting
+  // HERE would redraw whatever chat is now open and re-open ITS thought
+  // block. Only refresh the view that this send still owns.
+  if (!S.chat || S.chat.id !== body.chat_id) return;
   await loadChat();
   if (thinkWasOpen) {
     const last = $('stream').querySelector('.msg:last-child details.think');
     if (last) last.open = true;
   }
   loadMemories();
+}
+
+// Re-dress a live reply as whoever is actually writing it. The server
+// announces {speaker: {id, name, avatar, reason}} before the first token;
+// without this the streaming bubble wears the LEAD's name and face until the
+// post-stream reload, and in a cast scene that is a visible misattribution
+// for the whole time she is typing.
+function applySpeaker(replyEl, spk) {
+  const who = replyEl.querySelector('.msg-who');
+  if (who) {
+    who.textContent = spk.name || 'her';           // never trust as markup
+    if (spk.reason && (S.cast || []).length > 1) {
+      const chip = document.createElement('span');
+      chip.className = 'msg-why';
+      chip.textContent = spk.reason;
+      who.appendChild(chip);
+    }
+  }
+  const old = replyEl.querySelector('.msg-ava');
+  if (old && spk.avatar) {
+    const im = document.createElement('img');
+    im.className = 'msg-ava';
+    im.src = '/api/avatars/' + spk.avatar;
+    im.alt = '';
+    old.replaceWith(im);
+  }
 }
 
 // The one SSE reader for the main chat. send() and rerollMsg() both use it,
@@ -1890,6 +1997,12 @@ async function streamInto(body, replyEl, bubble) {
         if (chunk.error) { bubble.innerHTML = `<span class="ooc">error: ${esc(chunk.error)}</span>`; toast('error: ' + chunk.error); continue; }
         if (chunk.done) continue;
         if (chunk.notice) { toast(chunk.notice); continue; }
+        // Who is actually writing, announced BEFORE the first word. The live
+        // bubble used to be built with no speaker at all, so in a cast scene
+        // the whole reply streamed in under the lead's name and face and only
+        // snapped to the right person on the reload afterwards — which read
+        // as the wrong character answering.
+        if (chunk.speaker) { applySpeaker(replyEl, chunk.speaker); continue; }
         if (chunk.director_note) { showDirectorNote(chunk.director_note); continue; }
         if (chunk.tool_pending) { showTool(chunk.tool_pending); continue; }
         // she asked for a shot by name — same approval card as the buttons
@@ -1956,6 +2069,8 @@ async function rerollMsg(msgId, div, asId) {
   S.busy = false;
   $('btnSend').disabled = false;
   applyModelSel();
+  // Same guard as send(): don't repaint a chat this re-roll doesn't belong to.
+  if (!S.chat || S.chat.id !== body.chat_id) return;
   await loadChat();
 }
 
@@ -2151,7 +2266,13 @@ function requestBody(regen = false) {
   // to route. Any other value is the human overriding, and the human wins.
   const as = $('sendAs').value;
   if (S.castActive && as && as !== 'auto') body.speaker_id = +as;
-  if (S.director) body.director = S.director;
+  // BOTH halves are gated on the bar being open. Closing the bar takes the
+  // whole director channel out of the context on the very next turn — the
+  // text is kept (per chat) for when the bar reopens, but a collapsed bar
+  // sends nothing. It used to send S.director whenever the string was
+  // non-empty, which persisted in localStorage: stage direction typed once
+  // steered every later chat, invisibly, until the user found the ✕.
+  if (S.directorOn && S.director) body.director = S.director;
   if (S.directorOn && S.directorNotes) body.director_notes = true;
   if (!regen) body.text = $('input').value.trim() || '(preview)';
   if (S.attachments.length) {
@@ -2999,10 +3120,15 @@ $('galleryRefresh').onclick = loadGallery;
 function renderCast() {
   const strip = $('castStrip');
   const cast = S.cast || [];
-  strip.hidden = cast.length < 2;
+  // Tombstones don't count: they exist so old messages keep their author,
+  // not to make a solo chat look like a scene.
+  strip.hidden = cast.filter((c) => !c.tombstone).length < 2;
   const chips = $('castChips');
   chips.innerHTML = '';
   for (const c of cast) {
+    // A tombstone exists so old messages keep their author's name and face —
+    // she is not in the scene and gets no chip and no speaker option.
+    if (c.tombstone) continue;
     const chip = document.createElement('span');
     chip.className = 'cast-chip' + (c.present ? '' : ' away');
     chip.title = c.note || (c.present ? 'in the room' : 'off-stage');
@@ -3030,11 +3156,11 @@ function renderCast() {
     chips.appendChild(chip);
   }
   const sel = $('sendAs');
-  // `keep` is the live value; S.sendAs is what survived a reload. renderCast
-  // runs on every loadChat — i.e. after every send — and rebuilds the option
-  // list, so without restoring from both the browser silently falls back to
-  // option 0 and the user's pick lasted exactly one turn.
-  const keep = sel.value || S.sendAs || 'auto';
+  // S.sendAs is the source of truth: onchange mirrors every user pick into
+  // it (and into the per-chat map), and openChatById resets it when the chat
+  // changes. Preferring the live DOM value here carried the PREVIOUS chat's
+  // pick across a chat switch — the one window where the two diverge.
+  const keep = S.sendAs || 'auto';
   sel.innerHTML = '';
   const auto = document.createElement('option');
   auto.value = 'auto';
@@ -3065,19 +3191,87 @@ $('btnCast').onclick = () => {
 };
 // Without this the pick lives only in the DOM, and renderCast() rebuilds the
 // option list after every send.
-$('sendAs').onchange = () => { S.sendAs = $('sendAs').value; saveUI(); };
-$('castAdd').onclick = async () => {
+$('sendAs').onchange = () => {
+  S.sendAs = $('sendAs').value;
+  if (S.chat) {
+    if (S.sendAs !== 'auto') S.sendAsByChat[S.chat.id] = S.sendAs;
+    else delete S.sendAsByChat[S.chat.id];
+  }
+  saveUI();
+};
+// A clickable, searchable roster instead of typing a name into prompt() —
+// which was a placeholder wearing a feature's clothes. Built as elements,
+// not by id: dynamic ids are invisible to tests/test_frontend.py.
+$('castAdd').onclick = () => {
   if (!S.chat) return;
+  const open = document.querySelector('.cast-pick');
+  if (open) { open.remove(); return; }
   const inChat = new Set((S.cast || []).map((c) => String(c.character_id)));
+  inChat.add(String(S.chat.charId));
   const options = S.chars.filter((c) => !inChat.has(String(c.id)));
   if (!options.length) { toast('everyone you have is already in here'); return; }
-  const name = prompt('who walks in?\n\n'
-    + options.slice(0, 25).map((c) => c.name).join('\n'));
-  if (!name) return;
-  const pick = options.find((c) => c.name.toLowerCase() === name.trim().toLowerCase())
-    || options.find((c) => c.name.toLowerCase().includes(name.trim().toLowerCase()));
-  if (!pick) { toast('no one by that name'); return; }
-  await castEdit({ op: 'add', character_id: pick.id });
+
+  const pop = document.createElement('div');
+  pop.className = 'cast-pick';
+  const inp = document.createElement('input');
+  inp.type = 'search';
+  inp.placeholder = 'who walks in?';
+  const list = document.createElement('div');
+  list.className = 'cast-pick-list';
+  const close = () => {
+    pop.remove();
+    document.removeEventListener('mousedown', away);
+  };
+  const away = (e) => {
+    if (!pop.contains(e.target) && e.target !== $('castAdd')) close();
+  };
+  const paint = (q) => {
+    list.innerHTML = '';
+    const needle = (q || '').trim().toLowerCase();
+    const hits = options.filter(
+      (c) => !needle || (c.name || '').toLowerCase().includes(needle));
+    if (!hits.length) {
+      const none = document.createElement('div');
+      none.className = 'cast-pick-none';
+      none.textContent = 'nobody by that name';
+      list.appendChild(none);
+      return;
+    }
+    for (const c of hits.slice(0, 40)) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'cast-pick-row';
+      const face = document.createElement('span');
+      face.className = 'cast-face';
+      if (c.avatar) {
+        const im = document.createElement('img');
+        im.src = '/api/avatars/' + c.avatar;
+        face.appendChild(im);
+      } else { face.textContent = '♡'; }
+      const nm = document.createElement('b');
+      nm.textContent = c.name;                 // never trust as markup
+      row.append(face, nm);
+      row.onclick = async () => {
+        close();
+        await castEdit({ op: 'add', character_id: c.id });
+      };
+      list.appendChild(row);
+    }
+  };
+  inp.oninput = () => paint(inp.value);
+  inp.onkeydown = (e) => {
+    if (e.key === 'Escape') close();
+    if (e.key === 'Enter') {
+      const first = list.querySelector('.cast-pick-row');
+      if (first) first.click();
+    }
+  };
+  pop.append(inp, list);
+  $('castStrip').appendChild(pop);
+  paint('');
+  inp.focus();
+  // Deferred so the opening click doesn't immediately close it.
+  setTimeout(() => document.addEventListener('mousedown', away), 0);
 };
 
 // ── panels ───────────────────────────────────────────────────────
@@ -4598,8 +4792,7 @@ function phoneOpeningCard(box) {
     if (!LLM_READY() && !(await pickModel())) { toast('no model selected'); return; }
     hers.disabled = true;
     hers.textContent = 'thinking…';
-    const r = await post('/api/chats/text-first',
-      Object.assign(requestBody(), { chat_id: S.phone.chat.id }));
+    const r = await post('/api/chats/text-first', phoneBody(requestBody()));
     hers.disabled = false;
     hers.textContent = '✦ let her open';
     if (r.error) { toast('failed: ' + r.error); return; }
@@ -4873,7 +5066,18 @@ async function phoneRegen() {
   $('phoneSend').disabled = true;
   $('phoneStatus').textContent = 'typing…';
   phoneTyping(true);
-  await phoneStream(Object.assign(requestBody(true), { chat_id: S.phone.chat.id }));
+  await phoneStream(phoneBody(requestBody(true)));
+}
+
+// requestBody() is built for the MAIN chat: overriding chat_id points it at
+// the phone thread, but the director channel belongs to the scene the bar is
+// open over — stage direction for the main adventure must not steer her
+// texting sidechat. Strip it wherever the phone borrows the main body.
+function phoneBody(base) {
+  const b = Object.assign(base, { chat_id: S.phone.chat.id });
+  delete b.director;
+  delete b.director_notes;
+  return b;
 }
 
 // She asked to send something. Approve it in the phone rather than the main
@@ -4939,10 +5143,15 @@ $('phoneCam').onclick = async () => {
   if (!S.phone.chat) return;
   if (!LLM_READY()) { pickModel(); return; }
   $('phoneStatus').textContent = 'asking her…';
-  const d = await post('/api/studio/draft', Object.assign(requestBody(), {
-    recipe: 'selfie', opts: {}, chat_id: S.phone.chat.id,
-    character_id: S.phone.chat.charId,
-  }));
+  // Through phoneBody so the main chat's director ride-alongs are stripped —
+  // the draft route ignores them today, but a future recipe that reads them
+  // must not inherit another scene's direction by accident. The composer
+  // text goes too, for the same reason.
+  const camBody = Object.assign(phoneBody(requestBody()), {
+    recipe: 'selfie', opts: {}, character_id: S.phone.chat.charId,
+  });
+  delete camBody.text;
+  const d = await post('/api/studio/draft', camBody);
   $('phoneStatus').textContent = 'online';
   if (d.error) { toast('failed: ' + d.error); return; }
   phoneStudio(d);
@@ -5843,9 +6052,7 @@ async function nudgeCheck() {
 
   S.nudge.checking = true;
   try {
-    const r = await post('/api/chats/text-first', Object.assign(requestBody(), {
-      chat_id: S.phone.chat.id,
-    }));
+    const r = await post('/api/chats/text-first', phoneBody(requestBody()));
     // "sent: false" is a real answer — she looked and had nothing to say. Push
     // the clock forward anyway so we don't ask again in sixty seconds.
     S.phone.lastAt = Date.now() / 1000;

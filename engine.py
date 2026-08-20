@@ -142,6 +142,10 @@ def cast_active(chat: dict, cast: list) -> bool:
 # turn to produce a stuck pointer. Six free rules beat it outright.
 CAST_STREAK = 3            # consecutive turns before fairness even looks
 CAST_STARVE_WINDOW = 2     # × the number present
+# How far back a dismissed character's stamped lines keep the cast_absent
+# warning alive. Past this, her lines are too far up the log to imitate and
+# the warning is stale furniture in every later turn of the chat.
+CAST_ABSENT_WINDOW = 30
 
 
 def take_speaker(msg: dict):

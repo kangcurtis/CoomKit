@@ -51,6 +51,13 @@ Other rules:
   critic.
 - Do NOT repeat anything already in the existing memories, and do not restate
   the same fact in two scopes.
+- Never record the user's name or anything else from their persona — that is
+  configuration the engine already injects, not something learned in the
+  scene.
+- Anything the user and this character did TOGETHER, or that this character
+  said, promised or learned, is "character" — never "user". Reserve "user"
+  for facts that would survive unchanged into a story where this character
+  does not exist at all.
 - Prefer few high-value facts over many trivial ones. If nothing is worth
   keeping, output {"facts": []}."""
 
@@ -99,6 +106,123 @@ def extract_memories(llm_once, existing: list[str],
         facts.append({"scope": scope, "content": content})
         seen.add(content.lower())
     return facts[:6]
+
+
+def _mentions(text: str, name: str) -> bool:
+    """Does this sentence name her? Whole-word for ASCII names, substring for
+    names \\b cannot bound — the same carve-out the baton and the lorebooks
+    use, because \\b never matches between two CJK characters."""
+    if not name or not text:
+        return False
+    if re.match(r"\w", name[0], re.ASCII) and re.match(r"\w", name[-1], re.ASCII):
+        return bool(re.search(r"\b" + re.escape(name) + r"\b", text, re.I))
+    return name.lower() in text.lower()
+
+
+def persona_known(persona_name: str = "", persona_desc: str = "") -> list[str]:
+    """What the persona already told the model, phrased as memory lines.
+
+    Handed to the extractor as existing knowledge: the model 'discovers' the
+    user's name in a reply because the persona block put it in the prompt, and
+    without this it records that discovery as a memory — so a brand-new
+    character greets the player by name before any introduction has happened.
+    """
+    known = []
+    if persona_name and persona_name.strip().lower() not in ("anon", "user",
+                                                             "you", ""):
+        known.append(f"The user's name is {persona_name.strip()}.")
+    for sent in re.split(r"(?<=[.!?])\s+", persona_desc or ""):
+        sent = sent.strip()
+        if len(sent) > 8:
+            known.append(sent)
+    return known[:12]
+
+
+# "is called X" / "goes by X" / "X is her name" — the shapes a model reaches
+# for when it writes the name fact down. Symmetric Jaccard misses these
+# because 'name' and 'called' stem apart, so the name gets its own pattern.
+_NAMING = re.compile(r"\b(names?|named|calls?|called|goes by|known as)\b",
+                     re.IGNORECASE)
+
+
+def sanitize_facts(facts: list, persona_name: str = "", persona_desc: str = "",
+                   char_name: str = "", threshold: float = 0.6) -> list:
+    """Belt to the extractor prompt's braces. Two real failures:
+
+    - A "user" fact that restates the persona (the name, most of all) is
+      DROPPED: it was read out of the model's own system prompt, not learned,
+      and stored it makes every other character psychic.
+    - A "user" fact that names this character is DEMOTED to character scope:
+      "the user likes being teased by Mika" following the player into every
+      other woman's chat is the leak the scopes exist to prevent.
+
+    Restatement is measured by CONTAINMENT (how much of the fact is already in
+    a persona sentence), not symmetric similarity — "the user is a tall
+    engineer" is fully contained in a longer persona line yet Jaccard scores
+    it 0.5 and keeps it. `threshold` is kept for the caller's config plumbing
+    but containment uses its own, stricter bar.
+    """
+    known = persona_known(persona_name, persona_desc)
+    known_words = [_words(k) for k in known]
+    out = []
+    for f in facts:
+        if not isinstance(f, dict):
+            continue
+        if f.get("scope") == "user":
+            content = f.get("content") or ""
+            # The name fact, in any of its phrasings.
+            if persona_name and _mentions(content, persona_name) \
+                    and _NAMING.search(content):
+                continue
+            words = _words(content)
+            if words and any(kw and len(words & kw) / len(words) >= 0.8
+                             for kw in known_words):
+                continue
+            if char_name and _mentions(content, char_name):
+                f = {**f, "scope": "character"}
+        out.append(f)
+    return out
+
+
+def attribute_facts(facts: list, members: list) -> tuple:
+    """Split character-scope facts among the cast members they unambiguously
+    name. Returns ({character_id: [facts]}, leftovers).
+
+    `members` is [(id, name)]. Two names or zero is ambiguity, and ambiguity
+    goes to the leftovers for the caller's default (the lead) — the same
+    fall-through the baton uses, because guessing wrong files one woman's
+    history under another, which is worse than filing it under the lead.
+    """
+    buckets, rest = {}, []
+    for f in facts:
+        if isinstance(f, dict) and f.get("scope") == "character":
+            hits = {cid for cid, nm in members
+                    if nm and _mentions(f.get("content") or "", nm)}
+            if len(hits) == 1:
+                buckets.setdefault(hits.pop(), []).append(f)
+                continue
+        rest.append(f)
+    return buckets, rest
+
+
+def rescope_user_facts(conn: sqlite3.Connection, characters: list) -> int:
+    """Repair pass for rows written before sanitize_facts existed: a user-scope
+    row that is visibly about exactly ONE known character becomes a character
+    memory of hers. Two matches is ambiguity, and ambiguity is left alone —
+    the same fall-through the baton uses.
+
+    `characters` is [(id, name)]."""
+    moved = 0
+    for row in conn.execute(
+            "SELECT id, content FROM memories WHERE kind='user'").fetchall():
+        hits = {cid for cid, nm in characters
+                if nm and _mentions(row["content"], nm)}
+        if len(hits) == 1:
+            conn.execute(
+                "UPDATE memories SET kind='character', character_id=?,"
+                " chat_id=NULL WHERE id=?", (hits.pop(), row["id"]))
+            moved += 1
+    return moved
 
 
 def store_memories(conn: sqlite3.Connection, chat_id: int,
