@@ -29,14 +29,14 @@
   --surface-0: #120C1A;
   --surface:   #17101F;
   --surface-rgb:   23,16,31;
-  --surface-2: #1E1529;
-  --surface-3: #271B36;
-  --line:      #33244A;
-  --line-lit:  #8260AB;
+  --surface-2: #231834;
+  --surface-3: #2F2144;
+  --line:      #46325F;
+  --line-lit:  #8D6BB8;
 
   --text:      #F6ECF7;
   --text-dim:  #C3AFCE;
-  --text-mute: #9C88AC;
+  --text-mute: #A794B6;
 
   /* Ink for text sitting ON an accent fill — it must not follow --text. */
   --on-accent: #1B0A14;
@@ -76,14 +76,14 @@
   --bg:        #070C09;    --bg-rgb:      7,12,9;
   --surface-0: #0B120E;
   --surface:   #101A14;    --surface-rgb: 16,26,20;
-  --surface-2: #16221B;
-  --surface-3: #1E2E25;
-  --line:      #2A3F33;
-  --line-lit:  #557E64;
+  --surface-2: #1A2820;
+  --surface-3: #24382D;
+  --line:      #3B5745;
+  --line-lit:  #5F8D70;
 
   --text:      #ECF5EF;
   --text-dim:  #BCCCC1;
-  --text-mute: #8CA294;
+  --text-mute: #97AEA0;
 
   --on-accent: #071008;
   /* Teal, not green. The accent is H151 and --second is H207, which leaves
@@ -829,7 +829,20 @@ body.zen .topbar { display: none; }
   background: var(--surface-3);
   color: var(--text);
 }
-.recipe-btn .ri { font-size: 20px; line-height: 1; }
+.recipe-btn .ri { font-size: 20px; line-height: 1; color: var(--accent); }
+.recipe-btn .ri .ico { width: 20px; height: 20px; }
+
+/* sprite icons — stroke=currentColor, so they ride the colour cascade the
+   text was already using and switch palettes for free */
+.ico {
+  width: 1.05em;
+  height: 1.05em;
+  vertical-align: -0.16em;
+  display: inline-block;
+}
+.msg-ava .ico { width: 18px; height: 18px; color: var(--accent); }
+.wiz-step i .ico { width: 15px; height: 15px; }
+.ph-icon .ico { width: 18px; height: 18px; }
 .recipe-btn .rl { font-size: 11px; line-height: 1.2; }
 
 .tc-warn {
@@ -841,6 +854,67 @@ body.zen .topbar { display: none; }
   color: var(--gold-lit);
   font-size: 12px;
 }
+/* the reference pictures riding along with a draft — visible before a
+   minute of video is spent on the wrong one */
+.tc-refs { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.tc-refchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text-mute);
+  font-size: 11px;
+}
+.tc-refchip img {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+/* render progress — scaled to this box's last run when one is known */
+.tc-progress {
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: rgba(var(--accent-rgb), .16);
+  overflow: hidden;
+}
+.tc-progress-fill {
+  height: 100%;
+  width: 2%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width .8s linear;
+}
+.tc-progress-fill.crawl { animation: ck-crawl 2.4s ease-in-out infinite; }
+@keyframes ck-crawl {
+  0% { width: 4%; margin-left: 0; }
+  50% { width: 24%; margin-left: 60%; }
+  100% { width: 4%; margin-left: 96%; }
+}
+
+/* the "which picture of her" strip on video recipes */
+.refpick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.refpick-btn {
+  padding: 2px;
+  min-width: 44px;
+  height: 48px;
+  border: 2px solid var(--line);
+  border-radius: 7px;
+  font-size: 11px;
+}
+.refpick-btn img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 5px;
+  display: block;
+}
+.refpick-btn.sel { border-color: var(--accent); color: var(--text); }
+
 .tc-field {
   display: block;
   margin-top: 8px;
@@ -1054,6 +1128,23 @@ audio.gal-thumb {
 .blk-tag.ex    { background: rgba(var(--ok-rgb), .14); color: var(--ok); }
 .blk-tag.built { background: var(--surface-3); color: var(--text-mute); }
 .blk-tag.mod   { background: rgba(var(--second-rgb), .10); color: var(--text-mute); }
+/* enabled but not firing for the open chat — hover the tag for the reason */
+.blk-tag.idle  { background: var(--surface-3); color: var(--text-mute); }
+.blk-row.dormant .blk-name { color: var(--text-mute); }
+
+/* which API the turn leaves on — chat vs raw completion */
+.mode-badge {
+  font: 600 10px/1 var(--mono);
+  padding: 4px 7px;
+  border-radius: 5px;
+  background: rgba(var(--second-rgb), .16);
+  color: var(--second-lit);
+  white-space: nowrap;
+}
+.mode-badge.raw {
+  background: rgba(var(--accent-rgb), .16);
+  color: var(--accent-lit);
+}
 
 /* A real radio group: blocks sharing an `exclusive` name are one choice,
    painted as one boxed set with an explicit off. */
@@ -1563,3 +1654,117 @@ audio.gal-thumb {
 .cast-pick-row:hover { background: var(--surface-3); }
 .cast-pick-row b { font-weight: 600; }
 .cast-pick-none { color: var(--text-mute); font-size: 12px; padding: 6px; }
+
+/* ── mobile: the SMS experience IS the app ─────────────────────────────
+   Phone-sized screens hide the three-column layout entirely — at 400px the
+   grid's minimums already clipped the composer off the right edge with no
+   way to scroll to it (body is overflow:hidden) — and live in the phone
+   overlay plus this home screen. Foldables and tablets clear the 700px
+   gate and get the full UI untouched. None of these rules touch the
+   export's hazard selectors (.stream/.msg/.bubble/.think/.code-block),
+   which test_export brace-matches. */
+/* Styled after a stock Android SMS inbox — app bar, search pill,
+   conversation rows with a last-text preview and a timestamp, compose FAB —
+   in CoomKit's own palette. The diegesis is the point: on a phone, CoomKit
+   presents as her messaging app. */
+#mobileHome {
+  position: fixed; inset: 0; z-index: 70;
+  display: none;
+  flex-direction: column;
+  background: var(--bg);
+  overflow-y: auto;
+}
+#mobileHome.on { display: flex; }
+.mh-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 18px 8px 10px 18px;
+  position: relative;
+}
+.mh-mark { width: 26px; height: 26px; object-fit: contain; }
+.mh-title { font-size: 22px; font-weight: 700; }
+.mh-dots {
+  margin-left: auto;
+  width: 42px; height: 42px;
+  border: 0; border-radius: 50%;
+  background: none; color: var(--text-dim);
+  font-size: 22px; cursor: pointer;
+}
+.mh-dots:active { background: var(--surface-3); }
+.mh-menu {
+  position: absolute; right: 10px; top: 52px; z-index: 5;
+  display: flex; flex-direction: column;
+  min-width: 200px; padding: 6px;
+  border: 1px solid var(--line-lit); border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .5);
+}
+.mh-menu button {
+  padding: 12px 14px; border: 0; border-radius: 8px;
+  background: none; color: var(--text);
+  font-size: 15px; text-align: left; cursor: pointer;
+}
+.mh-menu button:active { background: var(--surface-3); }
+/* id-qualified: the app-wide input rule stacks four :not()s, so a bare
+   class loses the specificity race and 100%+margins overflows the screen */
+#mobileHome .mh-search {
+  width: auto;
+  margin: 4px 14px 10px;
+  padding: 12px 18px;
+  border: 0; border-radius: 24px;
+  background: var(--surface-2); color: var(--text);
+  font-size: 15px;
+}
+.mh-search::placeholder { color: var(--text-mute); }
+#mhList { display: flex; flex-direction: column; padding-bottom: 90px; }
+.mh-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 14px; row-gap: 2px;
+  align-items: center;
+  padding: 11px 16px;
+  border: 0; background: none;
+  color: var(--text); text-align: left; cursor: pointer;
+}
+.mh-row:active { background: var(--surface); }
+.mh-row img, .mh-row .mh-ava {
+  grid-row: 1 / 3;
+  width: 48px; height: 48px; border-radius: 50%; object-fit: cover;
+  display: grid; place-items: center;
+  background: var(--surface-3); color: var(--accent); font-size: 22px;
+}
+.mh-row b { font-size: 15.5px; font-weight: 600; }
+.mh-row .mh-snip {
+  grid-column: 2 / 4;
+  color: var(--text-mute); font-size: 13.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100%;
+}
+.mh-row time {
+  color: var(--text-mute); font-size: 11.5px; justify-self: end;
+}
+.mh-fab {
+  position: fixed; right: 18px; bottom: 22px; z-index: 6;
+  width: 56px; height: 56px;
+  border: 0; border-radius: 18px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+  color: #fff; font-size: 22px; cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+
+@media (max-width: 700px) {
+  .topbar, .layout, .cast-strip, #zenOut { display: none !important; }
+  .phone {
+    right: 0; bottom: 0; left: 0; top: 0;
+    width: auto; height: auto; max-height: none;
+    filter: none;
+  }
+  .phone-shell { border-radius: 0; border: 0; box-shadow: none; }
+  .phone-tab { right: 12px; bottom: 12px; }
+  .modal { width: 100%; }
+}
+
+/* alternate-greeting cycler — shown only while the greeting is the whole
+   chat; a scene that has started has chosen its opening */
+.greet-switch { padding: 2px 0 8px 46px; }
+.greet-switch .mini-btn { color: var(--text-mute); }

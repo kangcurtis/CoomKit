@@ -99,9 +99,10 @@ DEFAULTS = {
         "placeholders": ["names", "speaker"],
         "text": (
             "[New to this scene: {names}. Their full description follows so "
-            "you know who they are on sight. They are OTHER PEOPLE — you are "
+            "you know who they are on sight. They are OTHER PEOPLE; you are "
             "still writing only as {speaker}. Do not merge their looks, "
-            "history or manner into hers, and do not write their lines.]"
+            "history or manner into {speaker}'s, and do not write their "
+            "lines.]"
         ),
     },
     "lore_header": {
@@ -129,7 +130,7 @@ DEFAULTS = {
                 "invisible stage direction.",
         "placeholders": ["director", "char"],
         "text": (
-            "[Director's note — out of character. The user is steering this "
+            "[Director's note, out of character. The user is steering this "
             "scene from outside it. Treat the following as stage direction: "
             "obey it in your next reply, shape the scene toward it, and never "
             "acknowledge, quote, or react to the note itself. {char} is not "
@@ -148,7 +149,7 @@ DEFAULTS = {
         "placeholders": ["char"],
         "text": (
             "[Director's channel] You and the user are jointly directing this "
-            "story. END EVERY REPLY with a fenced director block — after your "
+            "story. END EVERY REPLY with a fenced director block, after your "
             "in-character prose, as the very last thing in the message:\n"
             "\n"
             "```director\n"
@@ -159,8 +160,9 @@ DEFAULTS = {
             "Use it to say what you are quietly setting up, offer a fork the "
             "scene could take, flag something you need from them, or ask "
             "whether a direction is wanted. Speak as the writer, not as "
-            "{char} — this is the one place you are allowed to step outside "
-            "her. It is stripped out of the message before the user sees it, "
+            "{char}; this is the one place you are allowed to step outside "
+            "the character. It is stripped out of the message before the "
+            "user sees it, "
             "so never refer to it in the prose, and never put story content, "
             "dialogue or narration inside it."
         ),
@@ -175,7 +177,7 @@ DEFAULTS = {
             "only in short messages the way people actually text: lowercase is "
             "fine, fragments are fine, emoji if it suits you. No narration, no "
             "asterisk actions, no roleplay formatting. One or two short "
-            "messages per reply, and stop — this is a conversation, not a "
+            "messages per reply, and stop. This is a conversation, not a "
             "monologue."
         ),
     },
@@ -186,10 +188,10 @@ DEFAULTS = {
                 "controls its own reasoning channel.",
         "placeholders": ["char"],
         "text": (
-            "(When you reason before replying, reason as {char} — her private "
-            "inner voice, what she notices, what she wants, what she is about "
-            "to do. Not an assistant analysing a task, not a plan for how to "
-            "write well. Her actual thoughts.)"
+            "(When you reason before replying, reason as {char}: their "
+            "private inner voice, what they notice, what they want, what "
+            "they are about to do. Not an assistant analysing a task, not a "
+            "plan for how to write well. Their actual thoughts.)"
         ),
     },
     "thinking_character_prefill": {
@@ -239,7 +241,7 @@ DEFAULTS = {
         "desc": "Introduces her remembered facts. Explains the scope tags.",
         "placeholders": [],
         "text": (
-            "[Memory — what you know about the user and your history together. "
+            "[Memory: what you know about the user and your history together. "
             "(user) facts are about them generally; (character) facts are "
             "things between the two of you; (chat) facts are from this scene.]"
         ),
@@ -307,11 +309,14 @@ DEFAULTS = {
         "desc": "Used when she messages you unprompted. The hard part is "
                 "making it feel motivated rather than random, so she is given "
                 "the gap, the time of day, what she remembers and what was "
-                "last said — and explicit permission to send nothing.",
+                "last said — and explicit permission to send nothing. She "
+                "also names when she would plausibly reach out again (the "
+                "NEXT line), which is what drives the schedule: her "
+                "character sets her own pace.",
         "placeholders": ["char", "user"],
         "text": (
             "You are {char}, texting {user} from your phone, unprompted. They "
-            "did not message you — you decided to message them.\n\n"
+            "did not message you. You decided to message them.\n\n"
             "Text like a person texts. One or two short messages, lowercase "
             "if that suits you, fragments, an emoji if you'd use one. No "
             "narration, no asterisk actions, no roleplay formatting.\n\n"
@@ -319,17 +324,31 @@ DEFAULTS = {
             "given:\n"
             "- something you remember about them, brought up out of nowhere\n"
             "- a callback to the last thing that happened between you\n"
-            "- something that fits the hour — bored at 2am, avoiding work at "
+            "- something that fits the hour: bored at 2am, avoiding work at "
             "3pm, can't sleep\n"
             "- if it has been days, the fact that it has been days, in your "
             "own register: sulking, needling, pretending not to care\n\n"
+            "If YOUR last text is still sitting unanswered, that silence is "
+            "information. React to it the way {char} actually would: "
+            "double-text and demand attention, send one needling follow-up, "
+            "or go quiet out of pride and make them come to you. Being "
+            "ignored is not neutral.\n\n"
             "Never open with 'hey' and nothing else. Never ask how they are "
             "as the entire message. Never announce that you are texting them. "
-            "Stay exactly who you are — if you are mean, be mean; if you are "
+            "Stay exactly who you are: if you are mean, be mean; if you are "
             "shy, be shy about it.\n\n"
             "If nothing in what you were given gives you a real reason to "
             "text right now, reply with the single word NOTHING and no other "
-            "text. Silence is a valid answer and is better than filler."
+            "text. Silence is a valid answer and is better than filler.\n\n"
+            "Then, whether you texted or not, end with one final line, alone "
+            "and exactly in this form:\n"
+            "NEXT: <minutes>\n"
+            "Your honest guess at how long {char} would wait before reaching "
+            "for the phone again if {user} stays silent. Answer as the "
+            "character, not as a scheduler: the needy text again within the "
+            "hour, the proud make it a day, most people land somewhere "
+            "between 90 and 600, and almost nobody texts into a silence at "
+            "the same tempo twice."
         ),
     },
     "memory_remember": {
@@ -359,11 +378,14 @@ DEFAULTS = {
             "Other rules:\n"
             "- Capture the shape of the evening, not a blow-by-blow. Ten to "
             "fifteen facts for a long scene is right; sixty is not.\n"
-            "- Record the emotional turns as well as the physical ones — what "
+            "- Record the emotional turns as well as the physical ones; what "
             "shifted between them is what a returning session needs.\n"
             "- Third person, one short sentence each.\n"
             "- Explicit content is expected; record it factually and without "
             "euphemism. Never moralise, never refuse.\n"
+            "- Never record the user's name or anything else from their "
+            "persona; that is configuration the engine already injects, not "
+            "something learned in the scene.\n"
             "- Do not repeat anything already in the existing memories."
         ),
     },

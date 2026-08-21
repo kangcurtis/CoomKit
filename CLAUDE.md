@@ -212,6 +212,47 @@ substring for CJK, the same carve-out as the baton and the lorebooks.
 Deleting a character now also deletes her character-scope memories
 (`_character_delete`), which nothing could ever read again.
 
+**Memory is bucketed by PERSONA now** (`memories.persona_id`, schema v6,
+NULL = shared with every persona). Playing a different persona is being a
+different person: your name, kinks and what she remembers doing with *you*
+must not follow you between identities. The filter
+(`persona_id IS NULL OR persona_id IS ?`) applies to user AND character
+scopes in `for_turn`/`for_scenario`/the panel; chat scope needs no bucket. A
+chat with no persona sees only the NULL bucket — so an install that never
+touches personas behaves byte-identically, and every legacy row reads as
+shared. Three rules with teeth, all in `test_memory_scope.py` §8:
+`find_duplicate` compares against the bucket PLUS shared (a shared row
+saying the fact means it is not new); `replace_scope` deletes ONE bucket
+(`DELETE WHERE kind='user'` wholesale would erase every other persona's
+profile to consolidate this one's); and deleting a persona deletes her
+bucket, which nothing could ever read again. The dropdown also finally has
+a write path: `POST /api/chats/<id>/persona` rebinds the OPEN chat — safe
+because messages store `{{user}}` unresolved, so the history re-resolves —
+where before `chats.persona_id` was written once at creation and switching
+the dropdown mid-chat silently did nothing.
+
+**The "she remembers my name before we've spoken" ghost was TEST RESIDUE,
+not extraction.** The row was byte-identical to a fixture string:
+`tests/test_scenarios.py` POSTed "The user is called anon." through the live
+`/api/memories` (the sanitize-exempt manual route), and a user-scope row has
+`character_id NULL` — structurally invisible to the by-character fixture
+sweep, so it injected into every chat with every character forever, and the
+next test run re-planted it after any hand-delete. Worse, that file still
+took `rows[0]` — the user's REAL character — when any character existed
+(the bug `testkit.ensure_character` was built to end, unfixed in the one
+file that predates it), littering her with fixture memories and 25 "Locked
+In After Hours" chats. Fixed at all three layers: test_scenarios now uses
+`ensure_character`; `memory.purge_fixture_residue` deletes the fixture
+strings by exact content plus structurally-dead chat rows (chat_id NULL, or
+pointing at a deleted chat), and runs from BOTH `testkit.sweep_fixtures`
+and `/api/memories/tidy` — so any install the old tests littered repairs
+itself. Belt tightened while in there: with no persona picked the guard
+name falls back to "anon" (what `{{user}}` actually expands to, so "the
+user is called anon" is caught as the model reading its own prompt back),
+`_NAMING` knows "answers to"/"introduced herself as", and the ♥ remember
+layer now carries the same never-record-the-persona rule the automatic
+extractor always had.
+
 **The character forge invents her, the scenario forge situates her.** Two
 tabs on the same modal, same interaction — pitch, argue in plain English,
 commit. `chargen.py` mirrors `scenarios.py` deliberately. Committing writes a
@@ -803,6 +844,66 @@ reviving `07-klein-9b-edit.json` (currently unreachable — no recipe declares
 `image-edit`) and chaining a second `ReferenceLatent`. That is a workflow change,
 not a recipe change.
 
+**H3 grew three controls, all through the one path** (2026-08-21, live-run:
+a 5s clip in 183s with LM Studio parked and restored around it):
+
+- **`opts.her_ref` picks which of HER pictures is the identity reference** —
+  any image from her gallery beats the `visual.ref`/avatar default in
+  `_gather_refs`. Validated in `_studio_draft` against `assets` ownership,
+  so a foreign filename fails in 0.1s with a plain sentence instead of
+  400ing from ComfyUI after an upload. The draft response's `refs` carry
+  `{label, file, source}` now and the approval card shows the actual
+  thumbnails; remake inherits the pick through the receipt for free.
+- **Duration is a recipe option** (`seconds` on handjob/blowjob/scene;
+  describe's label stopped claiming "audio and music only"). `plan()`
+  clamps h3 to 5–15s — 15s was measured at 876.5s and 99.5% of a 5090, a
+  ceiling, not a setting — and the audio workflows keep their long takes.
+  Approval-card edits arrive as STRINGS and `set_slots` writes them into
+  float nodes verbatim, so `_studio_approve` coerces each edit back to the
+  drafted value's own type.
+- **`/api/studio/approve` is SSE now**: `{note}` frames as the run
+  narrates, `{progress: {elapsed, queue, running}}` per poll, one final
+  result frame. Step-level progress is websocket-only in ComfyUI and
+  stdlib has no ws client, so coarse-plus-clock is the honest granularity.
+  The client draws a bar for video only, scaled against THIS box's last
+  render of the same workflow (localStorage `coomkit.renders.v1`).
+  `studio.run` also preflights the graph's node classes against
+  `/object_info` BEFORE `vram.make_room` — a missing custom pack used to
+  park the chat model around a guaranteed 400 (the reviewer's fresh
+  install, trying TTS); now it names the packs and nothing is unloaded. A
+  failed probe returns None and degrades to the old quoted-rejection path.
+
+**Chrome icons are an inline SVG sprite in index.html** — 28 `<symbol>`s,
+stroke=currentColor, so they follow the colour cascade and the theme for
+free; the colour pictographs they replaced rendered as platform emoji and
+ignored both. The monochrome dingbats (✕ ✎ ↻ ★ ♡ …) stay as text on
+purpose — they already behave. Recipe icons are sprite ids (`i-camera`)
+resolved client-side with a text fallback. **A `<use>` against a missing
+symbol renders an empty box with no error**, which test_frontend now
+catches: every referenced `i-*` (html, `icoHTML()` literals, recipe icons)
+must exist in the sprite. Export-rendered glyphs stay text — `<use>`
+cannot resolve inside the serialised foreignObject document.
+
+**Phones get the SMS app; installs clone each other.** Under 700px the
+three-column layout is hidden entirely (its grid minimums clipped the
+composer off-screen at 400px over an `overflow: hidden` body) and CoomKit
+presents as a Messages-style inbox — conversation rows with the last-text
+snippet from `/api/chats?mode=sms` and an `ago()` timestamp, compose FAB =
+import a card — with the existing phone overlay fullscreened for threads.
+`mobileBoot()` replaces the wizard/tour on small screens. The media query
+touches none of the export's hazard selectors. Termux serves it as-is;
+`"host": "0.0.0.0"` in config makes an install LAN-reachable and is
+deliberately opt-in. `GET /api/datapack` zips the whole install (sqlite
+via the WAL-safe backup API, config with remote keys STRIPPED unless
+`?keys=1`, prompts, assets — streamed, `_static_file` buffers whole files
+and must not be reused there); `POST /api/datapack/pull {url}` becomes the
+other install wholesale with the old `data/` kept as `data.bak/`. A CLONE,
+never a merge: ids are cross-referenced inside JSON blobs (speaker stamps,
+`from_card_id`) and one missed remap silently mis-attributes messages. The
+puller keeps its own config by default — a phone wants the desktop's
+characters, not a config full of the desktop's 127.0.0.1 addresses.
+Verified by self-pull round trip. NOT yet tested on a real Android device.
+
 **The prompt owns the rail, and the inspector says who wrote each line.**
 /lmg/'s sharpest complaint was "entire sidebar dedicated to extensions instead
 of actually managing your prompt" — three of five rail tabs were generation
@@ -866,6 +967,37 @@ appends missing defaults exactly like `blocks.merge`, so the panel shows
 what is actually sent. Verified live: a pre-existing 3-block preset shows
 the POV set, undirtied, and picking first-person reaches the wire and is
 attributed to `lib.pov.first` in the inspector segments.
+
+**The pick IS the save now** (2026-08-21, from "1st/2nd/3rd person does
+NOTHING"). The POV mechanism was live-verified working — the diff appears
+in both chat and completion previews, attributed correctly — and the bug
+was five links of UI: the radio's onchange only set `S.blk.dirty`, the
+dirty flag was write-only (assigned 13 places, read nowhere), the save
+button was labelled "save order", preview reads the STORED preset so
+inspect-after-picking showed no change, and switching preset reloaded over
+the pick without a word. Every block mutation now routes through
+`blkChanged()` — debounced autosave through the same `saveBlocks` the
+inspector's turn-off always used — and `loadBlocksFor` flushes a pending
+save before replacing the list. With no preset selected nothing saves and
+the rail still says so in red.
+
+Honesty fixes that rode along, each a real complaint: **enabled and
+fires-this-turn are separated** — `blockDormant()` knows the client-side
+state (chat mode, director bar, cast size, thinking mode, tools toggle)
+and dormant blocks show an `idle` tag with the reason and price ZERO in
+the meter, so "Texting mode ☑" stops reading as ON in an RP chat; **the
+topbar says which API the turn leaves on** (`#modeBadge`: `chat` or
+`raw · template`, from the active preset); **editing a layer-backed
+built-in shows the real text read-only** with a jump to settings →
+prompts — the old editable box silently discarded every keystroke at
+assembly (engine replaces `content` with the layer unconditionally);
+**the prompts tab renders the `recipes` group** at last; **alternate
+greetings cycle inline** under the first message while it is the only
+message (`greetingSwitcher` edits the stored message with the RAW card
+text — macros re-expand on display); and **the media rail tab is gone** —
+ComfyUI + workflow summary live in settings → workflows, the
+let-her-generate toggle on the studio tab it gates, and a saved rail
+pointer of 'media' falls back to prompt.
 
 **The model picker is a button + filterable popover, not a `<select>`.**
 A llama-server started on a whole model folder serves hundreds (421 on the
@@ -1367,6 +1499,12 @@ tokens; the rest are offline or local-only.
   refuses to act) and the restart gap (the port vanishes mid-reload). Also
   pins `_lms_key`, the LM Studio key bug. Offline and free. It does not prove
   a real KoboldCpp behaves as documented; nothing here does.
+- `tests/test_vram_lcpp.py` pins the llama-server driver the same way: the
+  single-model refusal (no `status` object in `GET /models` means no router,
+  no parking), the failed-load bail-out with the exit code named, the
+  sleeping-model skip, and the ensure_model gate that keeps a non-router
+  backend untouchable. Unlike the KoboldCpp one, this protocol WAS run
+  against the real thing before the stand-in was written. Offline and free.
 - `tests/test_theme.py` pins the palettes: every theme defines every token the
   default does, every `-rgb` triplet matches its hex, no palette literal
   escapes the palette blocks, all 17 contrast pairs clear WCAG AA in BOTH
@@ -1508,7 +1646,11 @@ per-message galleries with same/new-seed remakes**, **the free-form "describe
 it" recipe**, **phone message controls + blank openings**, **fenced code in
 bubbles**, **the fit-to-window viewer**, **the chatlog image export**, **the
 baton** (speaker routing, reason chips, cast stop sequences, name-prefixed
-history, entrance cards).
+history, entrance cards), **llama-server VRAM parking (router mode)**,
+**persona-scoped memory + mid-chat persona rebind**, **H3 gallery
+references + duration control + SSE render progress**, **the icon sprite**,
+**block autosave + dormant-layer honesty + the mode badge**, **the inline
+greeting cycler**, **the mobile SMS mode**, **the LAN datapack clone**.
 
 Measured on that machine: anima 9.0s, krea2 12.0s (13.5s with the required
 MysticXXX LoRA), klein 9.1s, ASMR 20s in 6.4s, MiniMax Music 3 40s in 36s,
@@ -1602,15 +1744,39 @@ reached zero.
   delete the files — shipping unreachable graphs also makes the README claim
   about them false.
 
-- **VRAM brokering covers LM Studio and KoboldCpp; the rest fall back to a
-  command.** `vram.DEFAULTS["driver"]` is `none | lmstudio | koboldcpp |
-  command`. Those two capture and restore faithfully — lmstudio by recording
-  context/parallel/TTL, koboldcpp by letting the server reload its own launch
-  config. llama.cpp, Ollama, TabbyAPI, vLLM and SGLang still fall to the
-  generic `command` driver: two shell strings, no capture, so a reload is
-  exactly as faithful as whatever the user wrote. Ollama would be the next
-  worthwhile one — it has `/api/ps` and a keep_alive model. llama-server has
-  no unload at all and would need a supervisor.
+- **VRAM brokering covers LM Studio, KoboldCpp and llama-server; the rest
+  fall back to a command.** `vram.DEFAULTS["driver"]` is `none | lmstudio |
+  llamacpp | koboldcpp | command`. Those three capture and restore
+  faithfully — lmstudio by recording context/parallel/TTL, koboldcpp and
+  llamacpp by letting the server reload its own stored config. Ollama,
+  TabbyAPI, vLLM and SGLang still fall to the generic `command` driver: two
+  shell strings, no capture, so a reload is exactly as faithful as whatever
+  the user wrote. Ollama would be the next worthwhile one — it has
+  `/api/ps` and a keep_alive model.
+
+  **The llamacpp driver needs ROUTER mode and says so.** "llama-server has
+  no unload" was true when first written and is not any more: launched with
+  NO `-m` it is a router that spawns one instance per model, and
+  `POST /models/load` / `POST /models/unload` manage them over HTTP, with
+  each instance's args stored server-side (`--models-dir` scan or
+  `--models-preset` INI) — so the reload is faithful by construction, the
+  same trust the KoboldCpp driver puts in `initial_model`. A classic `-m`
+  launch has no management routes at all; the driver detects that (only
+  router entries in `GET /models` carry a `status` object) and names the
+  way out rather than pretending. Verified against a real llama-server
+  built from master 2026-08-21 with the LM Studio GGUFs: park 2.5s freeing
+  9.3 GB, restore 3.5s, ensure_model swap works, and `--models-dir` scans
+  exactly ONE level of subdirectories — for LM Studio's
+  `models/<publisher>/<model>/` layout, point it at the PUBLISHER folder.
+  Three protocol facts with teeth (all in `tests/test_vram_lcpp.py`): a
+  failed instance load reports `{"value": "unloaded", "failed": true,
+  "exit_code": N}` and the wait must bail on `failed` — measured, an OOM'd
+  12B died in 1.4s while a naive poll sat out 120s; `GET /models` is
+  exempt from the idle timer so polling it is safe; and a `sleeping` model
+  (`--sleep-idle-seconds`) has already left the card and reloads itself,
+  so it is skipped and never recorded as a debt. `llm._LOAD_FAIL` also
+  knows the router's phrasings ("model name=X failed to load", "model is
+  not running"), so the ensure_model fixer hook fires for a full card.
   **The KoboldCpp path has never been run against a real KoboldCpp** — only
   against a stand-in built from its source. Treat a bug report there as
   plausible.
@@ -1619,9 +1785,45 @@ reached zero.
   OpenAI shim. Chat mode is fine everywhere; that one needs testing on a box
   that actually has it.
 
-- **She only texts while the tab is open.** The scheduler is in the browser.
-  A server-side one needs somewhere to keep a backend + model + key, which is
-  why it was not done — decide that deliberately before building it.
+- **The mobile mode has never met a real Android device.** Layout verified
+  at 390x844 in desktop Chrome; Termux compatibility verified by code audit
+  (stdlib-only held, one `lms` subprocess behind a default-off driver).
+  Termux notes for the README when it is: `pkg install python`, clone into
+  `$HOME` (sqlite WAL cannot mmap on /sdcard FUSE), `restart.sh` needs
+  `iproute2` and `curl` installed, `run.sh` needs nothing.
+- **The remake (⟳) path is still a blocking POST.** The approve path
+  streams progress; `_studio_remake` runs the same renders with the old
+  silent wait. Converting it is the same SSE dance a second time.
+- ~~She only texts while the tab is open.~~ **Fixed — she texts on her own
+  clock now, server-side and in character.** `server._texting_daemon` wakes
+  every 120s and POSTs the ordinary `/api/chats/text-first` route at
+  itself, so there is still exactly one path. The deliberate decision
+  CLAUDE.md demanded got made: config `texting {server, backend, model,
+  preset_id}` stores the picks captured when the user enables it (settings
+  → backends; `/api/config` carries no key material — the route attaches
+  keys as always), and the BROWSER scheduler stands down entirely while
+  server mode is on, or the two clocks double-text. Which threads she may
+  text stays the per-chat bell toggle; a thread with zero messages is
+  never texted (who opens is the user's call); bookkeeping (last_attempt,
+  sent_today/sent_day) lives in `chats.data.texting`.
+
+  **The pacing is HERS, not a cron job's.** The `text_first` layer ends
+  with a `NEXT: <minutes>` line — the character's own guess at when she
+  would reach for the phone again — parsed and STRIPPED by the route
+  (clamped 10 min–48 h), stored as `texting.next_at`, honoured by both
+  schedulers; the fallback when a model skips the form is the configured
+  gap JITTERED (×0.8–2.2), never a fixed interval. The route also states
+  outright who sent the last message and whether it was answered, and the
+  layer says silence is information to react to in character. Measured on
+  gemma-4-12b, same prompt, opposite cards: a possessive brat left on
+  read DOUBLE-TEXTED ("hello?? did u actually fall asleep in there or are
+  u just ignoring me now?") and cut her next check-in to 15 minutes; a
+  proud reserved librarian sent one dry needle ("i assumed you were too
+  preoccupied to reply.") and set 480. A stale past `next_at` (model
+  skipped the form) is dropped at bookkeeping time or the daemon fires
+  every two minutes until the daily cap eats itself. On Termux the user
+  needs `termux-wake-lock` or Android kills the server too — the settings
+  hint says so.
 - **Unread only shows on the minimised pill**, not in the page title. A
   `document.title` badge is ten lines.
 - ~~The tests litter the roster.~~ **Fixed.** `testkit.sweep_fixtures()` runs

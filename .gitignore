@@ -25,3 +25,4 @@ or-key
 # anything from it.
 *.local.md
 .coomkit-pub-credentials
+data.bak/

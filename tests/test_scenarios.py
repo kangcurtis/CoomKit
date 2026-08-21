@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 import scenarios  # noqa: E402
+import testkit    # noqa: E402  — fixture character + the at-exit sweep
 
 BASE = "http://127.0.0.1:3939"
 LOCAL = "http://127.0.0.1:1234/v1"
@@ -86,17 +87,12 @@ assert scenarios._salvage_objects("no json at all") == []
 print("parser: tolerant of noise, strict about completeness, salvages the rest")
 
 # ── 1. fixture card ──────────────────────────────────────────────
-rows = call("GET", "/api/characters")["rows"]
-if rows:
-    cid = rows[0]["id"]
-else:
-    synth = {"spec": "chara_card_v2", "data": {
-        "name": "Fixture-chan", "description": "a smug lab assistant",
-        "personality": "bratty", "scenario": "ORIGINAL CARD SCENARIO",
-        "first_mes": "the card's canned greeting"}}
-    cid = call("POST", "/api/cards/import", {
-        "filename": "f.json",
-        "b64": base64.b64encode(json.dumps(synth).encode()).decode()})["id"]
+# A FIXTURE character, never rows[0]. Taking whatever the roster held first
+# meant this file adopted the user's real starter card on a real install and
+# wrote fixture memories and "Locked In After Hours" chats all over her —
+# the exact bug testkit.ensure_character was built to end, in the one file
+# that never got the fix.
+cid = testkit.ensure_character()
 print("character:", cid)
 
 # ── 2. memory scope routing ──────────────────────────────────────

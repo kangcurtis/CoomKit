@@ -17,6 +17,176 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>%F0%9F%92%85</text></svg>">
 </head>
 <body>
+  <!-- Icon sprite. Every chrome icon is a <use> against these symbols —
+       stroke="currentColor" throughout, so icons inherit the button/tab
+       colour cascade and switch palettes for free. The monochrome dingbat
+       glyphs (star, close, pencil, arrows, hearts) stay as text: they
+       already render in theme colour and are part of the look. What this
+       sprite replaced is the COLOUR pictographs, which rendered as platform
+       emoji and ignored the palette entirely. -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+
+  <symbol id="i-clapper" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 11h18v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+    <path d="M3 11 2.1 7.6 19.6 3l.9 3.4z"/>
+    <path d="m8.2 6 .9 3.4"/>
+    <path d="m13.5 4.6.9 3.4"/>
+  </symbol>
+
+  <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/>
+    <circle cx="12" cy="13" r="3.5"/>
+  </symbol>
+
+  <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="9" cy="7" r="3.5"/>
+    <path d="M2.5 21v-1.5A5.5 5.5 0 0 1 8 14h2a5.5 5.5 0 0 1 5.5 5.5V21"/>
+    <path d="M16 3.4a3.5 3.5 0 0 1 0 7"/>
+    <path d="M21.5 21v-1.5a5.5 5.5 0 0 0-4-5.2"/>
+  </symbol>
+
+  <symbol id="i-paperclip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.5 11.5 12 20a5.5 5.5 0 0 1-7.7-7.7l8.4-8.4a3.7 3.7 0 0 1 5.2 5.2L9.4 17.6a1.85 1.85 0 0 1-2.6-2.6l8.5-8.5"/>
+  </symbol>
+
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="7"/>
+    <path d="m21 21-4.8-4.8"/>
+  </symbol>
+
+  <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 4h6a3 3 0 0 1 3 3v14a3 3 0 0 0-3-3H3z"/>
+    <path d="M21 4h-6a3 3 0 0 0-3 3v14a3 3 0 0 1 3-3h6z"/>
+  </symbol>
+
+  <symbol id="i-cards" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="3" width="11" height="15" rx="2"/>
+    <path d="M5.5 7v11.5A2.5 2.5 0 0 0 8 21h7.5"/>
+    <path d="M14.5 8 16.4 10.5 14.5 13l-1.9-2.5z" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <symbol id="i-photo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2"/>
+    <circle cx="8.5" cy="8.5" r="1.8"/>
+    <path d="m21 15.5-3.6-3.6a2 2 0 0 0-2.8 0L6 21"/>
+  </symbol>
+
+  <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="7.5" r="4"/>
+    <path d="M5 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1"/>
+  </symbol>
+
+  <symbol id="i-dice" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="3.5"/>
+    <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/>
+    <circle cx="16" cy="8" r="1.3" fill="currentColor" stroke="none"/>
+    <circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/>
+    <circle cx="8" cy="16" r="1.3" fill="currentColor" stroke="none"/>
+    <circle cx="16" cy="16" r="1.3" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <symbol id="i-speaker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11 5 6.5 9H3a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h3.5l4.5 4z"/>
+    <path d="M15.5 9a4.5 4.5 0 0 1 0 6"/>
+    <path d="M18.5 6.5a8 8 0 0 1 0 11"/>
+  </symbol>
+
+  <symbol id="i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3c.8 5 4 8.2 9 9-5 .8-8.2 4-9 9-.8-5-4-8.2-9-9 5-.8 8.2-4 9-9z"/>
+  </symbol>
+
+  <symbol id="i-flame" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 3c2.5 3.2 6 5.4 6 10a6 6 0 0 1-12 0c0-2.5 1.2-4.3 2.6-6 .7 1.4 1.5 2.3 2.9 3-.3-2.4-.1-4.7.5-7z"/>
+  </symbol>
+
+  <symbol id="i-selfie" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="8" y="2.5" width="10" height="16" rx="2.5"/>
+    <path d="M8 15H5.5"/>
+    <path d="M8 18.5H6a1.8 1.8 0 0 0-1.8 1.8V21"/>
+    <path d="M13 11.2c-1.7-1-2.6-1.9-2.6-3a1.4 1.4 0 0 1 2.6-.7 1.4 1.4 0 0 1 2.6.7c0 1.1-.9 2-2.6 3z" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <symbol id="i-hand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 10.5V4.5a1.8 1.8 0 0 0-3.6 0v6"/>
+    <path d="M10.4 10.5V6.5a1.8 1.8 0 0 0-3.6 0V14"/>
+    <path d="M14 10.5v-4a1.8 1.8 0 0 1 3.6 0v4"/>
+    <path d="M17.6 10.5V9a1.8 1.8 0 0 1 3.6 0v5a8 8 0 0 1-8 8h-1c-2.5 0-4.1-.8-5.5-2.2l-3.2-3.2a1.95 1.95 0 0 1 2.7-2.8l1.4 1.4"/>
+  </symbol>
+
+  <symbol id="i-lips" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 9.6c-1-1.3-2.3-1.9-3.8-1.9C5.6 7.7 3.9 9.4 3.5 12c2.1 3.2 5.1 4.8 8.5 4.8 3.4 0 6.4-1.6 8.5-4.8-.4-2.6-2.1-4.3-4.7-4.3-1.5 0-2.8.6-3.8 1.9z" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <symbol id="i-headphones" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>
+  </symbol>
+
+  <symbol id="i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11.5 17.5V4c2.8.6 4.5 2.3 4.5 5"/>
+    <circle cx="8.5" cy="17.5" r="3" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <symbol id="i-wand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 21 13.5 10.5"/>
+    <path d="M17.5 3.5c.3 1.9 1 2.6 3 3-2 .4-2.7 1.1-3 3-.3-1.9-1-2.6-3-3 2-.4 2.7-1.1 3-3z"/>
+    <path d="M5.5 4v3"/>
+    <path d="M4 5.5h3"/>
+    <path d="M18.5 15.5v3"/>
+    <path d="M17 17h3"/>
+  </symbol>
+
+  <symbol id="i-brain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 5a2.9 2.9 0 1 0-5.8.4 3.2 3.2 0 0 0-2.2 5.6 3.4 3.4 0 0 0 1 6 3.6 3.6 0 0 0 7 1z"/>
+    <path d="M12 5a2.9 2.9 0 1 1 5.8.4 3.2 3.2 0 0 1 2.2 5.6 3.4 3.4 0 0 1-1 6 3.6 3.6 0 0 1-7 1z"/>
+    <path d="M9 8.5a2.5 2.5 0 0 0 0 5"/>
+    <path d="M15 8.5a2.5 2.5 0 0 1 0 5"/>
+  </symbol>
+
+  <symbol id="i-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 22A10 10 0 0 1 12 2a10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.2a1.8 1.8 0 0 0-1.4 2.9l.3.4A1.8 1.8 0 0 1 12 22z"/>
+    <circle cx="8.5" cy="7.5" r="1.25" fill="currentColor" stroke="none"/>
+    <circle cx="13.5" cy="6" r="1.25" fill="currentColor" stroke="none"/>
+    <circle cx="17" cy="10.5" r="1.25" fill="currentColor" stroke="none"/>
+    <circle cx="6.5" cy="12.5" r="1.25" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <symbol id="i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 2 4 14h7l-1.5 8L20 10h-7z"/>
+  </symbol>
+
+  <symbol id="i-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/>
+    <path d="m3.3 7 8.7 5 8.7-5"/>
+    <path d="M12 22V12"/>
+  </symbol>
+
+  <symbol id="i-puzzle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 7h4.5a2.2 2.2 0 1 1 4 0H17v4.5a2.2 2.2 0 1 1 0 4V20H4z"/>
+  </symbol>
+
+  <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.8 1.8"/>
+    <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.8-1.8"/>
+  </symbol>
+
+  <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 8a6 6 0 0 0-12 0c0 4.5-1.4 6-2.7 7.3A1 1 0 0 0 4 17h16a1 1 0 0 0 .7-1.7C19.4 14 18 12.5 18 8z"/>
+    <path d="M10.3 21a2 2 0 0 0 3.4 0"/>
+  </symbol>
+
+  <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="7" y="2.5" width="10" height="19" rx="2.5"/>
+    <path d="M11 18.5h2"/>
+  </symbol>
+
+  <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="2" width="6" height="12" rx="3"/>
+    <path d="M5 11v1a7 7 0 0 0 14 0v-1"/>
+    <path d="M12 19v3"/>
+  </symbol>
+
+</svg>
+
 
 <!-- ══════════════════ TOPBAR ══════════════════ -->
 <header class="topbar">
@@ -36,7 +206,9 @@
         <div class="model-pop-list" id="modelList"></div>
       </div>
     </div>
-    <select id="presetSel" class="mini-select" title="Preset: sampling + jailbreak + thinking"></select>
+    <select id="presetSel" class="mini-select" title="Preset: sampling + jailbreak + thinking + request mode"></select>
+    <span id="modeBadge" class="mode-badge" hidden
+          title="How requests leave the box. chat = /chat/completions, the backend renders the template. raw = /completions, CoomKit renders the template itself (full prompt control, real prefill)."></span>
     <button class="icon-btn" id="toggleLeft" title="Roster ([)">◧</button>
     <button class="icon-btn" id="toggleRight" title="Side panel (])">◨</button>
     <button class="icon-btn" id="toggleZen" title="Zen: just the chat (\)">⛶</button>
@@ -93,6 +265,8 @@
         <select id="personaSel" class="mini-select" title="Your persona"></select>
       </div>
       <button class="ghost-btn" id="managePersonas">manage personas</button>
+      <button class="ghost-btn" id="plainChatBtn"
+              title="A plain chat: your preset, your jailbreak, your persona, no card">just the model</button>
     </div>
   </aside>
 
@@ -106,10 +280,10 @@
       </div>
       <div class="head-actions">
         <span class="badge alt" id="modeBadge" hidden>sms</span>
-        <button class="ghost-btn" id="btnDirector" title="Steer the scene out-of-character">🎬 direct</button>
+        <button class="ghost-btn" id="btnDirector" title="Steer the scene out-of-character"><svg class="ico" aria-hidden="true"><use href="#i-clapper"/></svg> direct</button>
         <button class="ghost-btn" id="btnRegen" title="Regenerate her last reply">↻ regen</button>
-        <button class="ghost-btn" id="btnExport" title="Turn this log into a picture you can post">📸 post</button>
-        <button class="ghost-btn" id="btnCast" title="Who else is in this scene">👥 cast</button>
+        <button class="ghost-btn" id="btnExport" title="Turn this log into a picture you can post"><svg class="ico" aria-hidden="true"><use href="#i-camera"/></svg> post</button>
+        <button class="ghost-btn" id="btnCast" title="Who else is in this scene"><svg class="ico" aria-hidden="true"><use href="#i-users"/></svg> cast</button>
       </div>
     </div>
 
@@ -143,8 +317,8 @@
       </div>
       <div class="attach-strip" id="attachStrip"></div>
       <div class="composer-tools">
-        <button class="ghost-btn" id="btnAttach" title="Show her a picture (stays on your machine)">📎 image</button>
-        <button class="ghost-btn" id="btnInspect" title="See the exact prompt before it goes out">🔍 inspect prompt</button>
+        <button class="ghost-btn" id="btnAttach" title="Show her a picture (stays on your machine)"><svg class="ico" aria-hidden="true"><use href="#i-paperclip"/></svg> image</button>
+        <button class="ghost-btn" id="btnInspect" title="See the exact prompt before it goes out"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg> inspect prompt</button>
         <span class="badge warm" id="visionBadge" hidden>local vision only</span>
         <div class="spacer"></div>
         <span class="note" id="tokenNote"></span>
@@ -165,7 +339,6 @@
       <button class="rail-tab" data-rail="studio">studio</button>
       <button class="rail-tab" data-rail="gallery">gallery</button>
       <button class="rail-tab" data-rail="memory">memory</button>
-      <button class="rail-tab" data-rail="media">media</button>
     </div>
 
     <div class="scroll">
@@ -290,7 +463,8 @@
       <!-- studio: one-click shots -->
       <div class="rail-pane" id="rail-studio">
         <div class="block">
-          <div class="block-head"><h3>Make something</h3><span class="badge" id="studioBadge">—</span></div>
+          <div class="block-head"><h3>Make something</h3><span class="badge" id="studioBadge">—</span>
+            <label class="check" title="When on, she can emit generation calls mid-scene. You always approve or edit the prompt before anything runs."><input type="checkbox" id="toolsToggle" checked> let her generate</label></div>
           <p class="hint">She drafts the prompt, you approve it, ComfyUI does the rest.</p>
           <div class="recipe-grid" id="recipeGrid"></div>
         </div>
@@ -317,6 +491,7 @@
             <select id="vramDriver">
               <option value="none">nothing, I'll do it myself</option>
               <option value="lmstudio">LM Studio (lms)</option>
+              <option value="llamacpp">llama-server (router mode)</option>
               <option value="koboldcpp">KoboldCpp (admin mode)</option>
               <option value="command">a command I'll write</option>
             </select>
@@ -331,6 +506,20 @@
             <p class="hint">KoboldCpp only frees its model in admin mode. Start it
               with <code>--admin --admindir &lt;folder&gt;</code> and it comes back
               on the exact config it launched with.</p>
+          </div>
+          <div id="vramLcpp" hidden>
+            <label>llama-server address
+              <input type="text" id="vramLcppUrl" placeholder="http://127.0.0.1:8080">
+            </label>
+            <label>API key (only if you set --api-key)
+              <input type="password" id="vramLcppKey" placeholder="leave empty if you didn't">
+            </label>
+            <p class="hint">llama-server only parks in <b>router mode</b>: start it
+              with no <code>-m</code> and point <code>--models-dir</code> at your
+              GGUF folder — one subfolder per model, or loose files. It reloads
+              from its own stored args, so context and offload come back exactly
+              as launched. A classic <code>-m</code> launch can't park; give it
+              <code>--sleep-idle-seconds</code> instead and it parks itself.</p>
           </div>
           <div class="row-btns">
             <button class="ghost-btn" id="vramRefresh">refresh</button>
@@ -359,30 +548,6 @@
       </div>
 
       <!-- media -->
-      <div class="rail-pane" id="rail-media">
-        <div class="block">
-          <div class="block-head"><h3>ComfyUI</h3><span class="badge" id="comfyBadge">offline</span></div>
-          <p class="hint">Your box, your workflows.</p>
-          <input id="comfyUrl" placeholder="http://desktop.local:8188">
-          <div class="row-btns">
-            <button class="ghost-btn" id="comfySave">save</button>
-            <button class="ghost-btn" id="comfyPing">test</button>
-          </div>
-          <p class="note" id="comfyNote"></p>
-        </div>
-        <div class="block">
-          <div class="block-head"><h3>Workflows</h3></div>
-          <p class="hint">She picks one by kind when she wants to make something. Manage them in settings.</p>
-          <ul class="mem-list" id="wfSummary"></ul>
-          <div class="row-btns">
-            <button class="ghost-btn" id="openWorkflows">manage workflows</button>
-          </div>
-        </div>
-        <div class="block">
-          <div class="block-head"><h3>Tools</h3><label class="check"><input type="checkbox" id="toolsToggle" checked> let her generate</label></div>
-          <p class="hint">When on, she can emit generation calls mid-scene. You always approve or edit the prompt before anything runs.</p>
-        </div>
-      </div>
     </div>
   </aside>
 </main>
@@ -421,6 +586,34 @@
           <label>api key <input id="rbKey" type="password" placeholder="sk-…"></label>
           <div class="row-btns"><button class="ghost-btn" id="rbAdd">add backend</button></div>
           <p class="note">Heads up: remote providers see your text. Vision stays local unless you explicitly pick a remote vision model.</p>
+        </div>
+        <div class="block">
+          <div class="block-head"><h3>Sync from another CoomKit</h3></div>
+          <p class="hint">A one-shot clone over your LAN: characters, chats,
+            memories, the gallery — everything. Your local backend settings
+            stay yours. The other install needs
+            <code>"host": "0.0.0.0"</code> in its <code>data/config.json</code>
+            to be reachable, and your current data survives as
+            <code>data.bak/</code>.</p>
+          <label>the other install's address
+            <input id="dpUrl" placeholder="http://192.168.1.20:3939"></label>
+          <label class="check"><input type="checkbox" id="dpKeys"> bring its API keys too</label>
+          <div class="row-btns"><button class="ghost-btn danger-btn" id="dpPull">replace my data with theirs</button></div>
+          <p class="note" id="dpNote"></p>
+        </div>
+        <div class="block">
+          <div class="block-head"><h3>She texts on her own clock</h3></div>
+          <p class="hint">Normally her unprompted texts are scheduled by this
+            browser tab, which on a phone is suspended the moment the screen
+            blanks. Turn this on and the <b>server</b> keeps her schedule
+            instead — she can text while the app is closed, using the backend
+            and model picked right now. Which threads she may text at all is
+            still the bell toggle on each phone thread. On Termux, run
+            <code>termux-wake-lock</code> or Android will eventually kill the
+            server too.</p>
+          <label class="check"><input type="checkbox" id="txServer">
+            let her text even with the app closed</label>
+          <p class="note" id="txNote"></p>
         </div>
       </div>
 
@@ -526,6 +719,23 @@
       </div>
 
       <div class="modal-pane" id="mtab-workflows">
+        <!-- Moved here from the rail: "The 'Media' is fine but it should
+             really be under settings than cluttering the main sidebar." -->
+        <div class="block">
+          <div class="block-head"><h3>ComfyUI</h3><span class="badge" id="comfyBadge">offline</span></div>
+          <p class="hint">Your box, your workflows.</p>
+          <input id="comfyUrl" placeholder="http://desktop.local:8188">
+          <div class="row-btns">
+            <button class="ghost-btn" id="comfySave">save</button>
+            <button class="ghost-btn" id="comfyPing">test</button>
+          </div>
+          <p class="note" id="comfyNote"></p>
+        </div>
+        <div class="block">
+          <div class="block-head"><h3>In play</h3></div>
+          <p class="hint">She picks one by kind when she wants to make something.</p>
+          <ul class="mem-list" id="wfSummary"></ul>
+        </div>
         <p class="hint"><b>Fourteen graphs already ship with CoomKit</b>: anima, krea2,
           klein, z-image, H3, Wan, OmniVoice, MiniMax Music. They drive the studio's
           one-click shots and everything she asks for herself; you don't have to add
@@ -579,7 +789,7 @@
 
         <div class="row-btns">
           <button class="ghost-btn" id="blkAdd">+ new block</button>
-          <button class="ghost-btn" id="blkLibBtn">📚 library</button>
+          <button class="ghost-btn" id="blkLibBtn"><svg class="ico" aria-hidden="true"><use href="#i-book"/></svg> library</button>
           <button class="ghost-btn" id="blkStarter">install starter set</button>
           <button class="ghost-btn" id="blkImport">import from SillyTavern…</button>
           <div class="spacer"></div>
@@ -599,7 +809,7 @@
       </div>
 
       <div class="modal-pane" id="mtab-prompts">
-        <p class="hint">Every instruction CoomKit injects on your behalf. These are the invisible sentences that steer the model: director framing, texting rules, how she reasons in character, how the forge pitches scenes, what the memory extractor keeps. Edit any of them; blank or unchanged resets to the shipped default. Use the 🔍 inspector to see the result in context.</p>
+        <p class="hint">Every instruction CoomKit injects on your behalf. These are the invisible sentences that steer the model: director framing, texting rules, how she reasons in character, how the forge pitches scenes, what the memory extractor keeps. Edit any of them; blank or unchanged resets to the shipped default. Use the inspect button on the composer to see the result in context.</p>
         <div class="row-btns">
           <button class="ghost-btn danger-btn" id="promptResetAll">reset everything to defaults</button>
         </div>
@@ -638,11 +848,11 @@
       <button class="icon-btn" id="closeForge">✕</button>
     </div>
     <div class="modal-tabs" id="forgeTabs">
-      <button class="modal-tab on" data-ftab="cards">🎴 cards</button>
+      <button class="modal-tab on" data-ftab="cards"><svg class="ico" aria-hidden="true"><use href="#i-cards"/></svg> cards</button>
       <button class="modal-tab" data-ftab="character">☆ a whole character</button>
-      <button class="modal-tab" data-ftab="feel">📷 that feel</button>
+      <button class="modal-tab" data-ftab="feel"><svg class="ico" aria-hidden="true"><use href="#i-photo"/></svg> that feel</button>
       <button class="modal-tab" data-ftab="scene">✦ a scene</button>
-      <button class="modal-tab" data-ftab="you">👤 (you)</button>
+      <button class="modal-tab" data-ftab="you"><svg class="ico" aria-hidden="true"><use href="#i-user"/></svg> (you)</button>
     </div>
     <div class="modal-body">
 
@@ -760,7 +970,7 @@
                   <input id="artistMinPosts" type="number" min="50" step="50" value="500"></label>
               </div>
               <div class="row-btns">
-                <button class="ghost-btn" id="artistRoll">🎲 roll</button>
+                <button class="ghost-btn" id="artistRoll"><svg class="ico" aria-hidden="true"><use href="#i-dice"/></svg> roll</button>
                 <button class="ghost-btn" id="artistSearchBtn">search…</button>
               </div>
               <input id="artistSearch" placeholder="type an artist name…" hidden>
@@ -861,7 +1071,7 @@
       <div class="forge-actions">
         <label class="check"><input type="checkbox" id="cfPortrait"> render a fresh portrait instead of using this picture</label>
         <div class="spacer"></div>
-        <button class="primary-btn" id="cfGo">📷 build her from this</button>
+        <button class="primary-btn" id="cfGo"><svg class="ico" aria-hidden="true"><use href="#i-photo"/></svg> build her from this</button>
       </div>
       <p class="note" id="cfNote"></p>
       <div id="cfResults"></div>
@@ -963,6 +1173,27 @@
 </div>
 
 <!-- ══════════════════ PHONE (sms sidechat) ══════════════════ -->
+<!-- Phone-sized screens get the SMS experience only — the full three-column
+     layout is hidden by the media query and this is the front door instead:
+     pick who to text, import a card, reach settings, or clone a desktop
+     install over the LAN. Foldables and tablets never see it. -->
+<div id="mobileHome" hidden>
+  <div class="mh-bar">
+    <img src="/img/nails.png" alt="" class="mh-mark">
+    <b class="mh-title">Messages</b>
+    <button class="mh-dots" id="mhMenu" title="more">⋮</button>
+    <div class="mh-menu" id="mhMenuPop" hidden>
+      <button id="mhImport">import a card</button>
+      <button id="mhSync">sync from my desktop</button>
+      <button id="mhSettings">settings</button>
+    </div>
+  </div>
+  <input id="mhSearch" class="mh-search" type="search"
+         placeholder="Search conversations" autocomplete="off">
+  <div id="mhList"></div>
+  <button class="mh-fab" id="mhFab" title="Someone new — import a card">✎</button>
+</div>
+
 <div class="phone" id="phone" hidden>
   <div class="phone-shell">
     <div class="phone-status" id="phoneDrag">
@@ -979,9 +1210,9 @@
         <i id="phoneStatus">online</i>
       </div>
       <button class="ph-icon" id="phoneAware"
-        title="Does she know what happened in your roleplay?">🔗</button>
+        title="Does she know what happened in your roleplay?"><svg class="ico" aria-hidden="true"><use href="#i-link"/></svg></button>
       <button class="ph-icon" id="phoneNudge"
-        title="Let her text you first">🔔</button>
+        title="Let her text you first"><svg class="ico" aria-hidden="true"><use href="#i-bell"/></svg></button>
       <button class="ph-x" id="phoneClose" title="close">✕</button>
     </div>
     <div class="phone-thread" id="phoneThread"></div>

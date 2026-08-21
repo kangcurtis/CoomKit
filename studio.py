@@ -189,7 +189,17 @@ def plan(recipe_id: str, opts: dict, ctx: dict, cfg: dict,
     # the graph — leaving it to the writer's JSON is how a track ends
     # mid-chorus.
     if "duration" in slots and opts.get("seconds"):
-        values["duration"] = float(opts["seconds"])
+        try:
+            values["duration"] = float(opts["seconds"])
+        except (TypeError, ValueError):
+            pass
+    # H3's honest range is 5–15 seconds. Below 5 the graph's frame snap
+    # rounds up anyway; above 15 was measured at 876.5s and 99.5% of a 5090 —
+    # the ceiling, not a setting. The audio workflows keep their long takes
+    # (a 45s ASMR is normal), so the clamp is keyed on the job being video.
+    if spec.get("kind") == "video" and "duration" in slots \
+            and values.get("duration"):
+        values["duration"] = min(15.0, max(5.0, float(values["duration"])))
     if "ambience" in slots:
         pick = opts.get("ambience", "breath")
         if pick in recipes.AMBIENCE:
@@ -296,7 +306,14 @@ def _gather_refs(recipe: dict, opts: dict, spec: dict,
 
     char_data = (character or {}).get("data") or {}
     visual = char_data.get("visual") or {}
-    if visual.get("ref"):
+    # A picture the user picked from her gallery beats the card's own
+    # reference: "use THAT one" is the whole request, and the card image is
+    # only the default for when nobody asked. Validated route-side against
+    # her gallery before it gets here.
+    if (opts or {}).get("her_ref"):
+        refs.append({"label": "her", "file": opts["her_ref"],
+                     "source": "gallery"})
+    elif visual.get("ref"):
         refs.append({"label": "her", "file": visual["ref"], "source": "character"})
     elif (character or {}).get("avatar"):
         refs.append({"label": "her", "file": character["avatar"],
@@ -666,11 +683,12 @@ VOICE_VOCAB = {
 # --------------------------------------------------------------------------
 
 def run(job: dict, values: dict, cfg: dict, asset_path=None,
-        note=None) -> dict:
+        note=None, progress=None) -> dict:
     """Build, broker the GPU, queue, and return the finished files.
 
     `asset_path(filename) -> bytes` resolves a stored CoomKit asset so
-    reference images can be uploaded to ComfyUI. Returns
+    reference images can be uploaded to ComfyUI. `progress` is handed down
+    to the ComfyUI poll loop — {elapsed, queue, running} per poll. Returns
     {files, meta, vram, workflow}.
     """
     say = note or (lambda _m: None)
@@ -761,11 +779,31 @@ def run(job: dict, values: dict, cfg: dict, asset_path=None,
                                stages=job.get("stages"),
                                loras=loras)
 
+    # Preflight the node classes BEFORE the VRAM dance. A missing custom
+    # node pack is a guaranteed 400 from ComfyUI, and the old order parked
+    # the chat model and handed it back around that 400 — pure ceremony,
+    # measured on a reviewer's fresh install trying TTS (the audio graphs
+    # need OmniVoice/Audio-Tools, which the splice cannot remove because
+    # they ARE the feature). Name the packs and the fix instead. A flaky
+    # probe returns None and degrades to the old behaviour: ComfyUI's own
+    # rejection is still quoted by _explain_rejection.
+    have = _node_classes(url)
+    if have is not None:
+        need = wfpack.missing(graph, have)
+        if need:
+            packs = sorted({wfpack.PACK_OF.get(c, c) for c in need})
+            raise StudioError(
+                f"your ComfyUI is missing {', '.join(packs)} — install "
+                f"through ComfyUI Manager, restart ComfyUI, and this will "
+                f"run. (Node classes it asked for: {', '.join(need[:4])}"
+                + (", …" if len(need) > 4 else "") + ")")
+
     report = vram.make_room(cfg, url, meta["vram_gb"], note=say)
     try:
-        say(f"🎨 {meta['label']} is rendering…")
+        say(f"{meta['label']} is rendering…")
         files = comfy.run_workflow(url, graph, {},
-                                   timeout_s=int(cfg.get("comfy_timeout", 900)))
+                                   timeout_s=int(cfg.get("comfy_timeout", 1800)),
+                                   progress=progress)
     finally:
         vram.give_back(cfg, url, report, note=say)
 
@@ -777,6 +815,19 @@ def run(job: dict, values: dict, cfg: dict, asset_path=None,
 # `voice_instruct`, the clone node calls it `instruct`. A writer that answers
 # in the other one's vocabulary is not wrong, so translate rather than drop.
 SLOT_ALIASES = {"voice_instruct": "instruct", "instruct": "voice_instruct"}
+
+
+def _node_classes(url: str):
+    """Every node class this ComfyUI serves, or None if we could not ask.
+
+    Same contract as _installed_loras: None means "unknown", and unknown
+    means "do not block anything on it".
+    """
+    try:
+        info = comfy.ComfyClient(url, timeout=8)._get("/object_info")
+        return set(info.keys()) if isinstance(info, dict) and info else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _installed_loras(url: str):

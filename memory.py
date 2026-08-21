@@ -13,6 +13,15 @@ Three scopes, deliberately separate (the Hermes / Claude-profile model):
   chat      — scene-local detail that should not leak into other sessions.
               "She is currently wearing his shirt."
 
+User and character scopes are additionally bucketed by PERSONA (`persona_id`,
+NULL = shared with every persona). Playing a different persona is being a
+different person: your name, your body, your kinks, and what she remembers
+doing with *you* must not follow you between identities. Rows written in a
+chat with no persona picked land in the NULL bucket, which every persona also
+sees — so an install that never touches personas behaves exactly as before,
+and legacy rows written before the column existed read as shared rather than
+vanishing. Chat scope needs no bucket; the scene dies with the chat.
+
 Retrieval for a turn = user ∪ character(this char) ∪ chat(this chat).
 The scenario forge reads user + character so a new scene can build on history
 without inheriting the last scene's furniture.
@@ -141,8 +150,9 @@ def persona_known(persona_name: str = "", persona_desc: str = "") -> list[str]:
 # "is called X" / "goes by X" / "X is her name" — the shapes a model reaches
 # for when it writes the name fact down. Symmetric Jaccard misses these
 # because 'name' and 'called' stem apart, so the name gets its own pattern.
-_NAMING = re.compile(r"\b(names?|named|calls?|called|goes by|known as)\b",
-                     re.IGNORECASE)
+_NAMING = re.compile(
+    r"\b(names?|named|calls?|called|goes by|known as|answers to"
+    r"|introduc\w+(?:\s+\w+){0,2}\s+as)\b", re.IGNORECASE)
 
 
 def sanitize_facts(facts: list, persona_name: str = "", persona_desc: str = "",
@@ -227,7 +237,7 @@ def rescope_user_facts(conn: sqlite3.Connection, characters: list) -> int:
 
 def store_memories(conn: sqlite3.Connection, chat_id: int,
                    character_id: int, facts: list,
-                   threshold: float = 0.6) -> int:
+                   threshold: float = 0.6, persona_id=None) -> int:
     """Persist scoped facts, skipping anything already known.
 
     The duplicate check happens HERE, against the database, and not against a
@@ -256,24 +266,28 @@ def store_memories(conn: sqlite3.Connection, chat_id: int,
         row_char = None if scope == "user" else character_id
         if scope == "character":
             row_chat = None          # spans every chat with her
+        # chat-scope furniture dies with the chat; only the durable scopes
+        # carry the persona bucket
+        row_persona = persona_id if scope in ("user", "character") else None
 
         dupe = find_duplicate(conn, scope, content, chat_id, character_id,
-                              threshold)
+                              threshold, persona_id)
         if dupe:
             conn.execute("UPDATE memories SET updated=? WHERE id=?",
                          (now, dupe))
             continue
         conn.execute(
             "INSERT INTO memories (chat_id, character_id, kind, content,"
-            " created, updated) VALUES (?,?,?,?,?,?)",
-            (row_chat, row_char, scope, content, now, now),
+            " created, updated, persona_id) VALUES (?,?,?,?,?,?,?)",
+            (row_chat, row_char, scope, content, now, now, row_persona),
         )
         count += 1
     return count
 
 
 def for_turn(conn: sqlite3.Connection, chat_id: int, character_id: int,
-             recent_text: str = "", limits: dict = None) -> list[dict]:
+             recent_text: str = "", limits: dict = None,
+             persona_id=None) -> list[dict]:
     """What one generation should actually see.
 
     Everything in scope is user ∪ character(this char) ∪ chat(this chat) — but
@@ -281,14 +295,20 @@ def for_turn(conn: sqlite3.Connection, chat_id: int, character_id: int,
     single turn and grew. Pass `limits` to rank by relevance and stop at a
     ceiling; pass nothing and you get the full set, which is what the memory
     panel and the forge want.
+
+    `persona_id` is the chat's persona: user and character rows are visible
+    when they are shared (persona_id NULL) or belong to that persona. A chat
+    with no persona sees only the shared bucket — persona A's kinks must not
+    inject into a just-me chat any more than into persona B's.
     """
     rows = conn.execute(
-        "SELECT * FROM memories WHERE kind='user'"
-        " OR (kind='character' AND character_id=?)"
+        "SELECT * FROM memories WHERE (kind='user'"
+        " OR (kind='character' AND character_id=?))"
+        " AND (persona_id IS NULL OR persona_id IS ?)"
         " OR (kind='chat' AND chat_id=?)"
         " ORDER BY CASE kind WHEN 'user' THEN 0 WHEN 'character' THEN 1"
         " ELSE 2 END, id",
-        (character_id, chat_id),
+        (character_id, persona_id, chat_id),
     ).fetchall()
     out = [dict(r) for r in rows]
     if not limits:
@@ -299,14 +319,16 @@ def for_turn(conn: sqlite3.Connection, chat_id: int, character_id: int,
                   limits.get("chat_keep", 6))
 
 
-def for_scenario(conn: sqlite3.Connection, character_id: int) -> list[dict]:
+def for_scenario(conn: sqlite3.Connection, character_id: int,
+                 persona_id=None) -> list[dict]:
     """What the scenario forge may draw on: who the user is, and their history
     with this character. Deliberately excludes chat-scope scene furniture."""
     rows = conn.execute(
-        "SELECT * FROM memories WHERE kind='user'"
-        " OR (kind='character' AND character_id=?)"
+        "SELECT * FROM memories WHERE (kind='user'"
+        " OR (kind='character' AND character_id=?))"
+        " AND (persona_id IS NULL OR persona_id IS ?)"
         " ORDER BY CASE kind WHEN 'user' THEN 0 ELSE 1 END, id",
-        (character_id,),
+        (character_id, persona_id),
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -314,16 +336,17 @@ def for_scenario(conn: sqlite3.Connection, character_id: int) -> list[dict]:
 def get_memories(conn: sqlite3.Connection, chat_id: int,
                  character_id: int | None = None) -> list[dict]:
     """For the UI panel — same set the next turn will actually see."""
+    row = conn.execute("SELECT character_id, persona_id FROM chats WHERE id=?",
+                       (chat_id,)).fetchone()
     if character_id is None:
-        row = conn.execute("SELECT character_id FROM chats WHERE id=?",
-                           (chat_id,)).fetchone()
         character_id = row["character_id"] if row else None
-    return for_turn(conn, chat_id, character_id or 0)
+    return for_turn(conn, chat_id, character_id or 0,
+                    persona_id=row["persona_id"] if row else None)
 
 
 def upsert(conn: sqlite3.Connection, mem_id: int | None, scope: str,
            content: str, chat_id: int | None,
-           character_id: int | None) -> int:
+           character_id: int | None, persona_id=None) -> int:
     """Manual add/edit from the UI. Users own their profile."""
     if scope not in SCOPES:
         scope = "chat"
@@ -332,7 +355,11 @@ def upsert(conn: sqlite3.Connection, mem_id: int | None, scope: str,
         chat_id = character_id = None
     elif scope == "character":
         chat_id = None
+    row_persona = persona_id if scope in ("user", "character") else None
     if mem_id:
+        # An edit keeps the row's stored persona bucket — recomputing it from
+        # the chat would refile a shared memory under whoever is playing at
+        # the moment of the edit, the same trap the character_id path names.
         conn.execute(
             "UPDATE memories SET kind=?, content=?, chat_id=?, character_id=?,"
             " updated=? WHERE id=?",
@@ -344,14 +371,15 @@ def upsert(conn: sqlite3.Connection, mem_id: int | None, scope: str,
     # Without it this endpoint could stack byte-identical rows without limit,
     # and because injection is ranked and capped, twenty copies of one fact
     # crowd every other memory out of the prompt entirely.
-    dup = find_duplicate(conn, scope, content, chat_id, character_id)
+    dup = find_duplicate(conn, scope, content, chat_id, character_id,
+                         persona_id=persona_id)
     if dup:
         conn.execute("UPDATE memories SET updated=? WHERE id=?", (now, dup))
         return dup
     cur = conn.execute(
         "INSERT INTO memories (chat_id, character_id, kind, content, created,"
-        " updated) VALUES (?,?,?,?,?,?)",
-        (chat_id, character_id, scope, content, now, now))
+        " updated, persona_id) VALUES (?,?,?,?,?,?,?)",
+        (chat_id, character_id, scope, content, now, now, row_persona))
     return cur.lastrowid
 
 # --------------------------------------------------------------------------
@@ -425,18 +453,26 @@ def similarity(a: str, b: str) -> float:
 
 
 def find_duplicate(conn: sqlite3.Connection, scope: str, content: str,
-                   chat_id, character_id, threshold: float = 0.6):
+                   chat_id, character_id, threshold: float = 0.6,
+                   persona_id=None):
     """An existing row saying the same thing, or None.
 
     Scoped to the same bucket — the same sentence at user scope and chat
-    scope are genuinely different claims about how durable it is.
+    scope are genuinely different claims about how durable it is. The durable
+    scopes compare against their own persona bucket PLUS the shared one: a
+    fact the shared bucket already holds is not new just because a persona is
+    playing, and bumping the shared row keeps it fresh for everyone.
     """
     if scope == "user":
-        rows = conn.execute("SELECT id, content FROM memories WHERE kind='user'")
+        rows = conn.execute(
+            "SELECT id, content FROM memories WHERE kind='user'"
+            " AND (persona_id IS NULL OR persona_id IS ?)", (persona_id,))
     elif scope == "character":
         rows = conn.execute(
             "SELECT id, content FROM memories WHERE kind='character'"
-            " AND character_id=?", (character_id,))
+            " AND character_id=?"
+            " AND (persona_id IS NULL OR persona_id IS ?)",
+            (character_id, persona_id))
     else:
         rows = conn.execute(
             "SELECT id, content FROM memories WHERE kind='chat' AND chat_id=?",
@@ -548,15 +584,23 @@ def consolidate(llm_once, memories: list, system: str = "") -> list:
 
 
 def replace_scope(conn: sqlite3.Connection, scope: str, contents: list,
-                  chat_id, character_id) -> int:
-    """Swap a scope's rows for a consolidated set, in one transaction."""
+                  chat_id, character_id, persona_id=None) -> int:
+    """Swap ONE BUCKET's rows for a consolidated set, in one transaction.
+
+    Bucketed by persona for the durable scopes — a wholesale
+    `DELETE WHERE kind='user'` would erase every other persona's profile to
+    consolidate this one's, which is corruption wearing a tidy hat.
+    """
     now = time.time()
+    rp = persona_id if scope in ("user", "character") else None
     if scope == "user":
-        conn.execute("DELETE FROM memories WHERE kind='user'")
+        conn.execute("DELETE FROM memories WHERE kind='user'"
+                     " AND persona_id IS ?", (rp,))
         rc, rch = None, None
     elif scope == "character":
         conn.execute("DELETE FROM memories WHERE kind='character'"
-                     " AND character_id=?", (character_id,))
+                     " AND character_id=? AND persona_id IS ?",
+                     (character_id, rp))
         rc, rch = None, character_id
     else:
         conn.execute("DELETE FROM memories WHERE kind='chat' AND chat_id=?",
@@ -565,9 +609,45 @@ def replace_scope(conn: sqlite3.Connection, scope: str, contents: list,
     for text in contents:
         conn.execute(
             "INSERT INTO memories (chat_id, character_id, kind, content,"
-            " created, updated) VALUES (?,?,?,?,?,?)",
-            (rc, rch, scope, text, now, now))
+            " created, updated, persona_id) VALUES (?,?,?,?,?,?,?)",
+            (rc, rch, scope, text, now, now, rp))
     return len(contents)
+
+
+# The test suite's memory fixtures, verbatim. tests/test_scenarios.py POSTs
+# these through /api/memories against the LIVE server — and a user-scope row
+# has character_id NULL, so the fixture sweep (which deletes by character)
+# could never remove it. The result on a real install: "The user is called
+# anon." injected into EVERY chat with EVERY character, which reads as the
+# extractor being psychic. Purged by exact content so both the sweep and
+# /api/memories/tidy can repair any database the old tests already littered.
+FIXTURE_RESIDUE = (
+    "The user is called anon.",
+    "They kissed in the lab once.",
+    "She is currently holding a clipboard.",
+)
+
+
+def purge_fixture_residue(conn: sqlite3.Connection) -> int:
+    """Delete test-fixture memories and structurally-dead rows.
+
+    Also removes chat-scope rows with chat_id NULL: `for_turn` matches chat
+    rows on `chat_id=?` and NULL never equals anything, so they are invisible
+    to injection AND to the panel — undeletable garbage with no other exit.
+    """
+    q = ",".join("?" * len(FIXTURE_RESIDUE))
+    cur = conn.execute(
+        f"DELETE FROM memories WHERE content COLLATE NOCASE IN ({q})",
+        FIXTURE_RESIDUE)
+    n = cur.rowcount
+    n += conn.execute(
+        "DELETE FROM memories WHERE kind='chat' AND chat_id IS NULL").rowcount
+    # ...and chat rows whose chat was deleted before _chat_delete learned to
+    # take its scene furniture with it. Same fate: never read again.
+    n += conn.execute(
+        "DELETE FROM memories WHERE kind='chat'"
+        " AND chat_id NOT IN (SELECT id FROM chats)").rowcount
+    return n
 
 
 def dedupe_existing(conn: sqlite3.Connection, threshold: float = 0.6) -> dict:
@@ -587,7 +667,7 @@ def dedupe_existing(conn: sqlite3.Connection, threshold: float = 0.6) -> dict:
         # different character is a different fact.
         buckets = {}
         for r in rows:
-            key = (r["character_id"], r["chat_id"])
+            key = (r["character_id"], r["chat_id"], r["persona_id"])
             buckets.setdefault(key, []).append(r)
         for group in buckets.values():
             survivors = []

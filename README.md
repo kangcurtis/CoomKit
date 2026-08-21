@@ -26,20 +26,24 @@ static files.
   so cards still work in ST. A CoomKit export carries her appearance, pinned
   seed and voice in the v3 `extensions` block, so the multimodal half of a
   card survives the round trip; other harnesses ignore it.
-- **Ships with a character.** A fresh install comes up with Mika, already
-  given a face, a pinned seed and a voice — so "🤳 Selfie" works in one click
-  instead of after an hour of setup.
+- **Ships with a character.** A fresh install comes up with Mika, created by Claude. Have fun with her I guess, or just drag in your own cards.
 - Streaming replies, collapsible thought blocks, swipes, regenerate
 - Two request modes: instruct/chat and raw completion with full prompt control
 - Prompt templates: Gemma 4 (canonical), ChatML, Llama 3, plain
-- Thinking styles: off, normal, or **in-character** — her filthy inner monologue
+- Thinking styles: off, normal, or **in-character**: her inner monologue
   instead of an assistant analysing a task
 - Reasoning prefill and reply prefill, with honest per-backend labelling of what
   actually works where
-- **SMS sidechat** — a separate phone-styled thread with the same character
+- **SMS sidechat** — a separate phone-styled thread with the same character.
+  On a phone-sized screen the SMS experience *is* the app: a Messages-style
+  inbox, threads fullscreen, and a one-shot LAN sync that clones your
+  desktop install over. She can text you unprompted on the **server's**
+  clock, so a suspended phone browser doesn't silence her. Away from home,
+  see [docs/REMOTE.md](docs/REMOTE.md) for tunneling back to your rig
+  (WireGuard/Tailscale) without exposing anything to the internet.
 - **Or no character at all.** "Just talk to the model" opens a plain chat with
   your preset, your jailbreak, your samplers and your persona, and nothing
-  else — a local LLM front-end when you want one, in the same window.
+  else.
 
 ![A plain chat with no character loaded](docs/shots/plain-chat.png)
 
@@ -219,11 +223,12 @@ this is for, what it will not become, and where help is actually wanted.
 
 The short version: local first with cloud APIs as deliberate second-class
 citizens; presets are toggleable prompt blocks rather than 24,000-token JSON;
-your log stays canonical; no dependencies, ever; measure it and say the number.
+your log stays canonical; no dependencies, ever.
 
-**The flagship ask is VRAM parking on every local backend.** LM Studio and
-KoboldCpp are done; Ollama, TabbyAPI, vLLM, SGLang and llama-server currently
-fall back to a pair of shell commands you write yourself. A driver is one file,
+**The flagship ask is VRAM parking on every local backend.** LM Studio,
+KoboldCpp and llama-server (router mode — start it with no `-m` and a
+`--models-dir`) are done; Ollama, TabbyAPI, vLLM and SGLang currently fall
+back to a pair of shell commands you write yourself. A driver is one file,
 four functions and a stand-in test, and if you run one of those you are the
 only person who can test it properly.
 

@@ -218,7 +218,7 @@ class ComfyClient:
         return prompt_id
 
     def wait_outputs(self, prompt_id: str, timeout_s: int = 600,
-                     poll: float = 1.5) -> list[dict]:
+                     poll: float = 1.5, progress=None) -> list[dict]:
         """Poll /history until done; return list of output file descriptors
         [{filename, subfolder, type, node_id, kind}].
 
@@ -227,8 +227,15 @@ class ComfyClient:
         an unsupported value, an OOM — sat out the full timeout and then
         surfaced as "timed out", which is the least useful description of a
         node that said exactly what was wrong ten seconds in.
+
+        `progress`, if given, is called on each poll with {elapsed, queue,
+        running}. Coarse on purpose: step-level progress is websocket-only in
+        ComfyUI and stdlib has no ws client, but queued-vs-running plus a
+        clock is the honest part anyway — it is what tells a user their
+        7-minute video render is alive rather than hung.
         """
-        deadline = time.time() + timeout_s
+        start = time.time()
+        deadline = start + timeout_s
         while time.time() < deadline:
             hist = self._get(f"/history/{prompt_id}")
             entry = hist.get(prompt_id)
@@ -246,6 +253,19 @@ class ComfyClient:
                 failure = _failure(entry)
                 if failure:
                     raise ComfyError(failure)
+            if progress:
+                try:
+                    q = self._get("/queue")
+                    # queue entries are [number, prompt_id, graph, extra, ...]
+                    pos = next((i for i, it in enumerate(
+                        q.get("queue_pending") or []) if it[1] == prompt_id),
+                        None)
+                    running = any(it[1] == prompt_id
+                                  for it in q.get("queue_running") or [])
+                    progress({"elapsed": round(time.time() - start, 1),
+                              "queue": pos, "running": running})
+                except Exception:  # noqa: BLE001 — progress must never kill a job
+                    pass
             time.sleep(poll)
         raise ComfyError(f"timed out waiting for {prompt_id}")
 
@@ -260,7 +280,7 @@ class ComfyClient:
 
 
 def run_workflow(base_url: str, workflow: dict, values: dict,
-                 timeout_s: int = 600) -> list[dict]:
+                 timeout_s: int = 600, progress=None) -> list[dict]:
     """High-level: substitute values, queue, wait, fetch bytes.
 
     values may include _image_bytes + _image_name for {{image}} slots.
@@ -275,5 +295,6 @@ def run_workflow(base_url: str, workflow: dict, values: dict,
             values["_image_bytes"], values.get("_image_name", "coomkit.png"))
     filled = substitute(workflow, values)
     prompt_id = client.queue_prompt(filled)
-    files = client.wait_outputs(prompt_id, timeout_s=timeout_s)
+    files = client.wait_outputs(prompt_id, timeout_s=timeout_s,
+                                progress=progress)
     return [{**f, "data": client.fetch_file(f)} for f in files]

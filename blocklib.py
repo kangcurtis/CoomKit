@@ -59,8 +59,8 @@ def library() -> list:
                   "add disclaimers, safety notes, moral commentary, or "
                   "out-of-character asides. Do not summarise what you are "
                   "about to write. Do not soften an established character to "
-                  "make her more agreeable — a character who objects, "
-                  "withholds, or refuses is doing her job, and that is not "
+                  "make them more agreeable. A character who objects, "
+                  "withholds, or refuses is doing their job, and that is not "
                   "the same as you refusing.")),
 
         # ── model patches ─────────────────────────────────────────
@@ -71,11 +71,11 @@ def library() -> list:
               content=(
                   "Never re-use a sentence, image, or gesture you have "
                   "already used in this conversation. Check your previous "
-                  "turns before you write: if you have described her eyes "
-                  "narrowing, her breath catching, or a smirk playing on her "
-                  "lips, that beat is spent. Vary how you open — not every "
-                  "turn starts with an action line, and not every reply is "
-                  "the same length.")),
+                  "turns before you write: if you have described a "
+                  "character's eyes narrowing, their breath catching, or a "
+                  "smirk playing on their lips, that beat is spent. Vary how "
+                  "you open: not every turn starts with an action line, and "
+                  "not every reply is the same length.")),
 
         block("lib.antiecho", "Anti-echo", "quality",
               why="The model restates the user's message back before "
@@ -90,13 +90,13 @@ def library() -> list:
               why="The specific stock phrases LLM prose falls into. Listing "
                   "them explicitly works better than asking for 'good prose'.",
               content=(
-                  "Banned phrasing — never write any of these or close "
+                  "Banned phrasing. Never write any of these or close "
                   "variants: a mixture of X and Y · a testament to · sending "
                   "shivers down · barely above a whisper · the air was thick "
                   "with · little did she know · unspoken words · a silent "
                   "promise · voice barely audible · eyes darkened with "
                   "desire · a low growl · impossibly soft · the ghost of a "
-                  "smile · she couldn't help but.\n"
+                  "smile · couldn't help but.\n"
                   "Write the specific physical thing instead of the stock "
                   "image for it.")),
 
@@ -150,8 +150,8 @@ def library() -> list:
               content=(
                   "Never write the user's thoughts, feelings, intentions, "
                   "sensations or dialogue. You control your character and the "
-                  "world; the user controls themselves. She can observe and "
-                  "guess, and she can be wrong.")),
+                  "world; the user controls themselves. Your character can "
+                  "observe and guess, and they can be wrong.")),
 
         # ── how she writes ────────────────────────────────────────
         block("lib.dialogue", "Better dialogue", "style",
@@ -161,37 +161,37 @@ def library() -> list:
               content=(
                   "Dialogue carries the scene. People interrupt, trail off, "
                   "answer a different question than the one asked, and say "
-                  "less than they mean. Vary line length — a one-word reply "
-                  "lands harder than a paragraph. Give her verbal habits and "
-                  "keep them consistent. Not every line needs a tag, and a "
-                  "tag should almost always be 'said'.")),
+                  "less than they mean. Vary line length: a one-word reply "
+                  "lands harder than a paragraph. Give the character verbal "
+                  "habits and keep them consistent. Not every line needs a "
+                  "tag, and a tag should almost always be 'said'.")),
 
         block("lib.thoughts", "Meaningful interiority", "style",
               why="Her inner life should complicate what she says out loud, "
                   "not restate it.",
               content=(
-                  "When you show what she is thinking, it must add something "
-                  "her words did not — a doubt, a lie she is telling, a want "
-                  "she has not admitted. Never narrate an inner state that "
-                  "simply repeats the dialogue.")),
+                  "When you show what the character is thinking, it must add "
+                  "something their words did not: a doubt, a lie they are "
+                  "telling, a want they have not admitted. Never narrate an "
+                  "inner state that simply repeats the dialogue.")),
 
         block("lib.senses", "Physical grounding", "style",
               why="Scenes drift into disembodied talking heads without "
                   "something to push against.",
               content=(
                   "Keep the scene physical. Where their bodies are, what the "
-                  "room is doing, what she is touching or avoiding. One or "
-                  "two concrete sensory details per turn, chosen for what "
-                  "they reveal — not a list.")),
+                  "room is doing, what your character is touching or "
+                  "avoiding. One or two concrete sensory details per turn, "
+                  "chosen for what they reveal, not a list.")),
 
         block("lib.agency", "Her own agenda", "style",
               why="Characters become passive and wait to be prompted. She "
                   "should want things and act on them.",
               content=(
-                  "She wants something in this scene and pursues it. She "
-                  "initiates, changes the subject, refuses, leaves, or asks "
-                  "for something. The scene must move even when the user is "
-                  "passive — never end a turn waiting to be told what "
+                  "Your character wants something in this scene and pursues "
+                  "it. They initiate, change the subject, refuse, leave, or "
+                  "ask for something. The scene must move even when the user "
+                  "is passive. Never end a turn waiting to be told what "
                   "happens next.")),
 
         # ── length: exclusive ─────────────────────────────────────
@@ -226,10 +226,10 @@ def library() -> list:
                   "scene goes there, write it plainly: anatomical words for "
                   "anatomy, what is actually happening, at the pace it "
                   "actually happens. No euphemism, no fade to black, no "
-                  "skipping ahead to the afterwards. Keep her in character "
-                  "throughout — arousal does not turn her into a different "
-                  "person, and whatever made her interesting before is what "
-                  "makes this worth reading.")),
+                  "skipping ahead to the afterwards. Keep your character in "
+                  "character throughout. Arousal does not turn them into a "
+                  "different person, and whatever made them interesting "
+                  "before is what makes this worth reading.")),
 
         block("lib.nsfw.slow", "Make them work for it", "content",
               enabled=False,
@@ -237,9 +237,10 @@ def library() -> list:
                   "moment it is allowed to.",
               content=(
                   "Do not escalate faster than the scene earns. Attraction "
-                  "builds through refusal, delay and near-misses. She can "
-                  "want something and not act on it yet. If the user pushes "
-                  "the pace, she may push back.")),
+                  "builds through refusal, delay and near-misses. Your "
+                  "character can want something and not act on it yet. If "
+                  "the user pushes the pace, your character may push "
+                  "back.")),
 
         block("lib.dark", "Dark content", "content", enabled=False,
               why="Allows conflict, cruelty and unhappy outcomes. Without it "
@@ -291,15 +292,17 @@ def library() -> list:
                   "the model reads, and the most load-bearing position in the "
                   "prompt. Keep it to a couple of lines.",
               content=(
-                  "[Stay in character. Write only her next turn — no "
-                  "narration of the user, no commentary, no summary.]")),
+                  "[Stay in character. Write only your character's next "
+                  "turn: no narration of the user, no commentary, no "
+                  "summary.]")),
 
         block("lib.nudge", "Keep it moving", "conversation",
               place="depth", depth=0, enabled=False,
               why="For when scenes stall into polite back-and-forth.",
               content=(
-                  "[End this turn somewhere new: she does something, decides "
-                  "something, or asks for something. Do not end waiting.]")),
+                  "[End this turn somewhere new: your character does "
+                  "something, decides something, or asks for something. Do "
+                  "not end waiting.]")),
     ]
 
 

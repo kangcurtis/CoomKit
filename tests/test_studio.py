@@ -651,7 +651,7 @@ conn = _sq.connect(":memory:")
 conn.row_factory = _sq.Row
 conn.execute("""CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER, character_id INTEGER, kind TEXT, content TEXT,
-    created REAL, updated REAL)""")
+    created REAL, updated REAL, persona_id INTEGER)""")
 _mem.store_memories(conn, 1, 1, [{"scope": "user", "content": "The user is called anon."}])
 _mem.store_memories(conn, 1, 1, [{"scope": "user", "content": "The user is called anon."}])
 _mem.store_memories(conn, 1, 1, [{"scope": "user", "content": "the user is called anon"}])
@@ -670,7 +670,7 @@ conn2 = _sq.connect(":memory:")
 conn2.row_factory = _sq.Row
 conn2.execute("""CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER, character_id INTEGER, kind TEXT, content TEXT,
-    created REAL, updated REAL)""")
+    created REAL, updated REAL, persona_id INTEGER)""")
 for i in range(4):
     conn2.execute("INSERT INTO memories (kind, content, created, updated)"
                   " VALUES ('user','The user is called anon.',1,?)", (i,))

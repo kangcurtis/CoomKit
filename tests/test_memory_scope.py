@@ -252,6 +252,87 @@ directed = T.call("POST", "/api/chats/preview",
 check("direction in the request is the one thing that fires it",
       "Director's note" in directed and "she gets bolder" in directed)
 
+# ── 8. persona buckets: being someone else means remembering as them ─────
+print("\npersona buckets")
+
+# pure half: the bucket filter, over an in-memory table
+mconn = sqlite3.connect(":memory:")
+mconn.row_factory = sqlite3.Row
+mconn.execute("CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+              " chat_id INTEGER, character_id INTEGER, kind TEXT,"
+              " content TEXT, created REAL, updated REAL, persona_id INTEGER)")
+memory.store_memories(mconn, 1, 7, [
+    {"scope": "user", "content": "The user has a scar over one eyebrow."}],
+    persona_id=101)
+memory.store_memories(mconn, 1, 7, [
+    {"scope": "user", "content": "The user lives by the harbour."}])
+memory.store_memories(mconn, 1, 7, [
+    {"scope": "character", "content": "They danced on the pier."}],
+    persona_id=101)
+seen_a = {m["content"] for m in memory.for_turn(mconn, 1, 7, persona_id=101)}
+seen_none = {m["content"] for m in memory.for_turn(mconn, 1, 7)}
+seen_b = {m["content"] for m in memory.for_turn(mconn, 1, 7, persona_id=202)}
+check("the persona sees her own rows plus the shared bucket",
+      len(seen_a) == 3, str(seen_a))
+check("a just-me chat sees only the shared bucket",
+      seen_none == {"The user lives by the harbour."}, str(seen_none))
+check("another persona sees shared but never hers",
+      seen_b == {"The user lives by the harbour."}, str(seen_b))
+check("dedup compares against shared too, not just the bucket",
+      memory.find_duplicate(mconn, "user", "The user lives by the harbour.",
+                            None, None, persona_id=101) is not None)
+memory.replace_scope(mconn, "user", ["The user is scarred."], None, None,
+                     persona_id=101)
+left = {m["content"] for m in memory.for_turn(mconn, 1, 7)}
+check("consolidating one persona's bucket leaves the shared rows standing",
+      "The user lives by the harbour." in left, str(left))
+
+# API half: the rebind route and the panel
+CHAR = T.ensure_character()
+pa = T.call("POST", "/api/personas",
+            {"name": "Fixture-persona-A", "data": {"description": "tall"}})
+pb = T.call("POST", "/api/personas",
+            {"name": "Fixture-persona-B", "data": {"description": "short"}})
+pa_id, pb_id = pa.get("id"), pb.get("id")
+chat_a = T.call("POST", "/api/chats/new",
+                {"character_id": CHAR, "persona_id": pa_id})["chat_id"]
+T.call("POST", "/api/memories",
+       {"scope": "user", "content": "The user keeps a fixture lighthouse.",
+        "chat_id": chat_a})
+chat_b = T.call("POST", "/api/chats/new",
+                {"character_id": CHAR, "persona_id": pb_id})["chat_id"]
+chat_n = T.call("POST", "/api/chats/new", {"character_id": CHAR})["chat_id"]
+in_a = {m["content"] for m in
+        T.call("GET", f"/api/chats/{chat_a}/memories")["memories"]}
+in_b = {m["content"] for m in
+        T.call("GET", f"/api/chats/{chat_b}/memories")["memories"]}
+in_n = {m["content"] for m in
+        T.call("GET", f"/api/chats/{chat_n}/memories")["memories"]}
+check("a memory written as persona A shows in her chat",
+      "The user keeps a fixture lighthouse." in in_a, str(in_a))
+check("persona B never sees it",
+      "The user keeps a fixture lighthouse." not in in_b, str(in_b))
+check("neither does a just-me chat",
+      "The user keeps a fixture lighthouse." not in in_n, str(in_n))
+
+r = T.call("POST", f"/api/chats/{chat_n}/persona", {"persona_id": pa_id})
+in_n2 = {m["content"] for m in
+         T.call("GET", f"/api/chats/{chat_n}/memories")["memories"]}
+check("rebinding the open chat to persona A brings her memories with it",
+      r.get("ok") is True
+      and "The user keeps a fixture lighthouse." in in_n2, str(in_n2))
+check("a bogus persona is refused",
+      "error" in T.call("POST", f"/api/chats/{chat_n}/persona",
+                        {"persona_id": 999999}))
+
+# deleting the persona takes her memory bucket with it
+T.call("DELETE", f"/api/personas/{pa_id}")
+T.call("DELETE", f"/api/personas/{pb_id}")
+orphans = T.call("GET", f"/api/chats/{chat_b}/memories")["memories"]
+check("a deleted persona's bucket is gone, not orphaned invisible garbage",
+      all(m["content"] != "The user keeps a fixture lighthouse."
+          for m in orphans))
+
 print()
 if fails:
     print(f"MEMORY SCOPE TESTS FAILED ({len(fails)}): " + ", ".join(fails))

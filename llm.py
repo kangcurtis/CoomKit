@@ -216,6 +216,9 @@ def build_completion_payload(messages: list[dict], model: str, samplers: dict,
 _LOAD_FIXER = None
 _LOAD_FAIL = re.compile(
     r"failed to load model|no models? loaded|model .{0,60}not found|"
+    # llama-server router: "model name=X failed to load" when the instance
+    # died (usually OOM), "model is not running" with --no-models-autoload.
+    r"model .{0,60}(failed to load|is not running)|"
     r"insufficient (system|gpu) (memory|resources)", re.I)
 
 

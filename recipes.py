@@ -83,6 +83,10 @@ MOVING_OPT = _opt("bool", "Video", None, False,
                   "Generate a short clip with sound instead of a still.")
 AMBIENCE_OPT = _opt("choice", "Ambience", list(AMBIENCE), "breath",
                     "The bed under her voice. Tops out at 47.6 seconds.")
+SECONDS_OPT = _opt("number", "Clip length (s)", None, 10,
+                   "Video only — ignored for a still. 5 to 15; ten seconds "
+                   "is minutes of render, fifteen is the ceiling and "
+                   "basically the whole card.")
 
 
 # --------------------------------------------------------------------------
@@ -95,7 +99,7 @@ AMBIENCE_OPT = _opt("choice", "Ambience", list(AMBIENCE), "breath",
 
 RECIPES = {
     "solo-model": {
-        "label": "Modelling photo", "icon": "📸", "group": "photo",
+        "label": "Modelling photo", "icon": "i-camera", "group": "photo",
         "media": ["image"],
         "blurb": "A deliberate, posed portrait. She knows the camera is there.",
         "options": {"wardrobe": WARDROBE_OPT,
@@ -118,7 +122,7 @@ RECIPES = {
     },
 
     "solo-lewd": {
-        "label": "Filthy solo", "icon": "🔥", "group": "photo",
+        "label": "Filthy solo", "icon": "i-flame", "group": "photo",
         "media": ["image"],
         "blurb": "The one she'd only send you.",
         "options": {"explicit": EXPLICIT_OPT,
@@ -138,7 +142,7 @@ RECIPES = {
     },
 
     "selfie": {
-        "label": "Selfie", "icon": "🤳", "group": "photo",
+        "label": "Selfie", "icon": "i-selfie", "group": "photo",
         "media": ["image"],
         "blurb": "Phone camera, her arm's length. The one that lands in a text.",
         "options": {"wardrobe": WARDROBE_OPT,
@@ -160,11 +164,11 @@ RECIPES = {
     },
 
     "handjob": {
-        "label": "Handjob", "icon": "✋", "group": "act",
+        "label": "Handjob", "icon": "i-hand", "group": "act",
         "media": ["image", "video"],
         "blurb": "Optionally from your own eyeline, optionally moving.",
         "options": {"pov": POV_OPT, "moving": MOVING_OPT,
-                    "explicit": EXPLICIT_OPT},
+                    "explicit": EXPLICIT_OPT, "seconds": SECONDS_OPT},
         "brief": (
             "Write a prompt showing {char} giving {user} a handjob.\n\n"
             "SUBJECT: {char}. {appearance}\n"
@@ -182,11 +186,11 @@ RECIPES = {
     },
 
     "blowjob": {
-        "label": "Blowjob", "icon": "💋", "group": "act",
+        "label": "Blowjob", "icon": "i-lips", "group": "act",
         "media": ["image", "video"],
         "blurb": "Optionally from your own eyeline, optionally moving.",
         "options": {"pov": POV_OPT, "moving": MOVING_OPT,
-                    "explicit": EXPLICIT_OPT},
+                    "explicit": EXPLICIT_OPT, "seconds": SECONDS_OPT},
         "brief": (
             "Write a prompt showing {char} giving {user} a blowjob.\n\n"
             "SUBJECT: {char}. {appearance}\n"
@@ -204,10 +208,11 @@ RECIPES = {
     },
 
     "scene": {
-        "label": "This moment", "icon": "🎬", "group": "act",
+        "label": "This moment", "icon": "i-clapper", "group": "act",
         "media": ["image", "video"],
         "blurb": "Whatever is happening in the chat right now, rendered.",
-        "options": {"pov": POV_OPT, "moving": MOVING_OPT},
+        "options": {"pov": POV_OPT, "moving": MOVING_OPT,
+                    "seconds": SECONDS_OPT},
         "brief": (
             "Render the moment happening right now in this scene.\n\n"
             "SUBJECT: {char}. {appearance}\n"
@@ -224,7 +229,7 @@ RECIPES = {
     },
 
     "asmr": {
-        "label": "ASMR", "icon": "🎧", "group": "audio",
+        "label": "ASMR", "icon": "i-headphones", "group": "audio",
         "media": ["asmr"],
         "blurb": "Whispered in your ear, over a bed of texture.",
         "options": {"lewd": _opt("bool", "Lewd", None, False),
@@ -255,7 +260,7 @@ RECIPES = {
     },
 
     "song": {
-        "label": "Song", "icon": "🎵", "group": "audio",
+        "label": "Song", "icon": "i-note", "group": "audio",
         "media": ["music"],
         "blurb": "She writes you one. Lyrics and all.",
         "options": {"lewd": _opt("bool", "Lewd", None, False),
@@ -282,7 +287,7 @@ RECIPES = {
     },
 
     "speak": {
-        "label": "Say it out loud", "icon": "🔊", "group": "audio",
+        "label": "Say it out loud", "icon": "i-speaker", "group": "audio",
         "media": ["tts"],
         "blurb": "Her last reply, in her voice. Dialogue only — no narration.",
         "options": {},
@@ -298,7 +303,7 @@ RECIPES = {
     # is the one where you say it yourself and she does the translating —
     # which is the whole point of shipping the dialect skills.
     "describe": {
-        "label": "Describe it", "icon": "🪄", "group": "custom",
+        "label": "Describe it", "icon": "i-wand", "group": "custom",
         # media[0] is what target_kind falls back to when no kind arrives.
         "media": ["image", "video", "asmr", "tts", "music"],
         "blurb": "Tell me what you want in plain words. I'll translate it "
@@ -312,8 +317,13 @@ RECIPES = {
             "brief_text": _opt("textarea", "What do you want", None, "",
                                "she's on the balcony at 3am in my shirt, "
                                "city behind her, shot from inside"),
-            "seconds": _opt("number", "Length (s) — audio and music only",
-                            None, 45),
+            # The label used to claim "audio and music only", which was
+            # false: for kind=video this flows straight into the graph, so
+            # the untouched 45s default drafted a 45-second H3 job. plan()
+            # clamps video to 5–15s now, and the label tells the truth.
+            "seconds": _opt("number", "Length (s)", None, 45,
+                            "Audio and music take it as-is; video is "
+                            "clamped to 5–15."),
         },
         "requires": ["brief_text"],
         "brief": (

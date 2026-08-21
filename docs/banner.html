@@ -1,0 +1,86 @@
+<!doctype html>
+<!-- The README banner, as a reproducible source. Rasterise with:
+     google-chrome-stable --headless=new --screenshot=docs/banner.png \
+       --window-size=1200,440 --hide-scrollbars docs/banner.html
+     The photo is docs/banner-hands.png — krea2, seed 3303, rendered through
+     the bundled workflow. Regenerate it the same way or not at all. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 440px; overflow: hidden; }
+  body {
+    position: relative;
+    font-family: "Noto Sans", "DejaVu Sans", Arial, sans-serif;
+    background:
+      repeating-linear-gradient(180deg,
+        rgba(255,255,255,.016) 0 1px, transparent 1px 44px),
+      radial-gradient(900px 600px at 96% 8%,
+        rgba(214, 60, 134, .28), transparent 60%),
+      linear-gradient(112deg, #16101f 0%, #221331 44%, #3b1a4c 78%, #4a1f56 100%);
+    color: #efe6f4;
+  }
+  .wordmark {
+    position: absolute; left: 64px; top: 96px;
+    font-size: 88px; font-weight: 800; letter-spacing: -2px; line-height: 1;
+  }
+  .wordmark .kit { color: #f75f9d; }
+  .wordmark .star {
+    position: absolute; top: -14px; right: -34px;
+    font-size: 34px; color: #f5c542; letter-spacing: 0;
+  }
+  .tag {
+    position: absolute; left: 66px; top: 200px;
+    font-size: 26px; color: #cdbfdc;
+  }
+  .rule {
+    position: absolute; left: 66px; top: 258px; width: 556px; height: 1px;
+    background: rgba(255,255,255,.14);
+  }
+  .mono {
+    position: absolute; left: 66px;
+    font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+    font-size: 19px; color: #9d8fb2; letter-spacing: .5px;
+  }
+  .mono.run { color: #f75f9d; }
+  .bubble {
+    position: absolute; left: 522px; top: 50px; width: 318px;
+    padding: 16px 22px;
+    background: #241732;
+    border: 1px solid rgba(247, 95, 157, .28);
+    border-radius: 16px;
+    font-size: 22px; line-height: 1.45; color: #e9def2;
+  }
+  .bubble b { color: #ffffff; }
+  .bubble::after {
+    content: "";
+    position: absolute; right: -14px; top: 44px;
+    border: 10px solid transparent;
+    border-left-color: #241732;
+    border-right-width: 0;
+    transform: scaleY(1.2);
+  }
+  .hands {
+    position: absolute; right: -56px; top: -110px; width: 430px;
+    -webkit-mask-image:
+      linear-gradient(90deg, transparent 0, #000 90px),
+      linear-gradient(180deg, #000 78%, transparent 99%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(90deg, transparent 0, #000 90px),
+      linear-gradient(180deg, #000 78%, transparent 99%);
+    mask-composite: intersect;
+  }
+</style>
+</head>
+<body>
+  <div class="wordmark">Coom<span class="kit">Kit</span><span class="star">★</span></div>
+  <div class="tag">multimodal adult roleplay, supervised</div>
+  <div class="rule"></div>
+  <div class="mono" style="top: 288px">python 3.10 stdlib&nbsp;&nbsp;·&nbsp;&nbsp;no deps&nbsp;&nbsp;·&nbsp;&nbsp;no build step</div>
+  <div class="mono run" style="top: 326px">./run.sh&nbsp;&nbsp;→&nbsp;&nbsp;127.0.0.1:3939</div>
+  <div class="bubble">*sigh*&nbsp; you again.<br><b>fine. show me your prompt.</b></div>
+  <img class="hands" src="banner-hands.png" alt="">
+</body>
+</html>

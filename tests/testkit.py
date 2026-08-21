@@ -96,6 +96,15 @@ def sweep_fixtures():
         return 0
     try:
         conn = sqlite3.connect(str(db), timeout=5)
+        # Fixture MEMORIES first, and unconditionally: a user-scope fixture
+        # row has character_id NULL, so the by-character sweep below is
+        # structurally blind to it — and that row injects "The user is
+        # called anon." into every chat with every character forever. Purged
+        # by exact content, which also repairs databases the old tests
+        # already littered.
+        import memory
+        memory.purge_fixture_residue(conn)
+        conn.commit()
         q = ",".join("?" * len(FIXTURE_NAMES))
         ids = [r[0] for r in conn.execute(
             f"SELECT id FROM characters WHERE name IN ({q})", FIXTURE_NAMES)]

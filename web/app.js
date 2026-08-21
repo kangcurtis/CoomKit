@@ -3,6 +3,13 @@
 // · settings modal. Everything talks to the stdlib server over /api.
 
 const $ = (id) => document.getElementById(id);
+// Chrome icons come from the sprite in index.html. `name` is always one of
+// our own constants — never user or model text — so the fixed template is
+// not an injection surface. Icons inherit currentColor, so they follow the
+// button/tab colour cascade and the theme for free.
+function icoHTML(name) {
+  return `<svg class="ico" aria-hidden="true"><use href="#${name}"/></svg>`;
+}
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -228,6 +235,12 @@ async function boot() {
   // The flag lives in data/config.json rather than localStorage so that
   // `rm -rf data/` means what everyone assumes it means. localStorage is
   // still honoured so an existing user is not walked through setup again.
+  if (MOBILE.matches) {
+    // On a phone the wizard and tour are desktop furniture; the home screen
+    // says how to get set up (clone the desktop, or import a card).
+    await mobileBoot();
+    return;
+  }
   const done = (S.cfg && S.cfg.setup) || localStorage.getItem('coomkit.setup.v1');
   if (!done) {
     openWizard();
@@ -261,6 +274,9 @@ function restoreUI(ui) {
   $('toolsToggle').checked = S.tools;
   $('thinkBadge').textContent = $('thinkMode').value;
   if (ui.rail && ui.rail !== 'scene') {
+    // 'media' no longer exists as a rail tab (its blocks live in settings →
+    // workflows now); a session that saved it lands on the prompt tab.
+    if (ui.rail === 'media') ui.rail = 'prompt';
     const tab = document.querySelector(`.rail-tab[data-rail="${ui.rail}"]`);
     if (tab) tab.click();
   }
@@ -295,6 +311,17 @@ function showEmpty() {
 async function restoreChat(ui) {
   const want = ui.chat;
   if (!want || !want.id) return;
+  // A plain chat has no character on purpose. Bailing when the roster
+  // lookup missed meant "just talk to the model" never survived a reload —
+  // the session landed on the empty state, which happened to be the only
+  // place the plain-chat button existed. Both halves of that are fixed.
+  if (want.charId == null) {
+    const d = await api('/api/chats/' + want.id);
+    if (d && !d.error && Array.isArray(d.messages)) {
+      await openChatById(null, want.id, want.mode || 'rp');
+    }
+    return;
+  }
   const c = S.chars.find((x) => x.id === want.charId);
   if (!c) return;
   const mode = want.mode || 'rp';
@@ -780,6 +807,16 @@ function syncSceneFromPreset() {
   if (d.prefill !== undefined) $('replyPrefill').value = d.prefill || '';
   if (d.samplers) setSamplerInputs(d.samplers);
   $('thinkBadge').textContent = $('thinkMode').value;
+  // Which API the turn actually leaves on was invisible outside the preset
+  // form and a post-hoc inspector badge — "it isn't even clear whether we're
+  // using text or chat completion" is a fair complaint about a prompt tool.
+  const badge = $('modeBadge');
+  badge.hidden = !p;
+  if (p) {
+    const raw = (d.mode || 'chat') === 'completion';
+    badge.textContent = raw ? `raw · ${d.template || 'gemma4'}` : 'chat';
+    badge.className = 'mode-badge' + (raw ? ' raw' : '');
+  }
 }
 
 function setSamplerInputs(s) {
@@ -823,7 +860,23 @@ $('samplerBlock').addEventListener('toggle', saveUI);
 for (const id of ['thinkPrefill', 'replyPrefill']) {
   $(id).addEventListener('input', saveUI);
 }
-$('personaSel').onchange = saveUI;
+$('personaSel').onchange = async () => {
+  saveUI();
+  // Rebind the OPEN chat too, not just chats created later. Messages are
+  // stored with {{user}} intact, so the reload below re-resolves the whole
+  // history to the new name — and memory follows the persona's own bucket.
+  if (S.chat && S.chat.chatId) {
+    const pid = +$('personaSel').value || null;
+    const r = await post(`/api/chats/${S.chat.chatId}/persona`,
+                         { persona_id: pid });
+    if (r && r.ok) {
+      toast(pid ? 'this scene is now yours as ' +
+            ($('personaSel').selectedOptions[0]?.textContent || 'that persona')
+            : 'back to just you');
+      loadChat();
+    }
+  }
+};
 $('thinkMode').onchange = () => {
   $('thinkBadge').textContent = $('thinkMode').value;
   saveUI();
@@ -1275,7 +1328,6 @@ function renderWfSummary() {
     ul.innerHTML = '<li class="mem-empty">Nothing loaded, check the server log.</li>';
   }
 }
-$('openWorkflows').onclick = () => openSettings('workflows');
 $('wfSave').onclick = async () => {
   let wf;
   try { wf = JSON.parse($('wfJson').value); }
@@ -1616,6 +1668,47 @@ async function loadChat() {
   const notes = d.messages.filter((m) => m.director);
   showDirectorNote(notes.length ? notes[notes.length - 1].director : '');
   syncExamples(d);
+  greetingSwitcher(d, box);
+}
+
+// "In a fresh chat, alternate greetings should be an easy selection right
+// under the first message, not buried away" — quite right; the scene-rail
+// picker only applied to the NEXT chat you created. While the greeting is
+// the only message, cycle it in place. Editing the stored message with the
+// RAW card text is safe by the oldest rule in the file: messages keep their
+// {{user}}/{{char}} macros and the display expands them.
+function greetingSwitcher(d, box) {
+  if (!S.chat || S.chat.plain || S.chat.mode === 'sms') return;
+  if (!Array.isArray(d.messages) || d.messages.length !== 1) return;
+  const first = d.messages[0];
+  if (first.role !== 'assistant' || !first.id) return;
+  const c = S.chars.find((x) => x.id === S.chat.charId);
+  const card = (c && c.data && (c.data.data || c.data)) || {};
+  const alts = card.alternate_greetings || [];
+  if (!alts.length) return;
+  const all = [card.first_mes || '', ...alts].filter((g) => g && g.trim());
+  if (all.length < 2) return;
+  // Which one is on screen? The display is macro-expanded, so expand each
+  // candidate the same crude way just to find the index; the crude version
+  // never gets stored.
+  const crude = (t) => t.replace(/\{\{char\}\}/gi, S.chat.name)
+    .replace(/\{\{user\}\}/gi, ($('personaSel').selectedOptions[0] || {})
+      .textContent || 'anon').trim();
+  const at = all.findIndex((g) => crude(g) === (first.content || '').trim());
+  const next = (at + 1) % all.length;   // at === -1 → 0, the card's own
+  const row = document.createElement('div');
+  row.className = 'greet-switch';
+  const btn = document.createElement('button');
+  btn.className = 'mini-btn';
+  btn.textContent = `↻ try another opening (${(at < 0 ? 0 : at) + 1}/${all.length})`;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const r = await post('/api/messages/' + first.id, { content: all[next] });
+    if (r.error) { toast('failed: ' + r.error); btn.disabled = false; return; }
+    await loadChat();
+  };
+  row.appendChild(btn);
+  box.appendChild(row);
 }
 
 function buildMsg(role, content, meta = {}) {
@@ -1660,7 +1753,7 @@ function buildMsg(role, content, meta = {}) {
       <button class="mini-btn rr" title="Another take">↻</button>
       ${(S.cast || []).filter((c) => c.present).length > 1
         ? `<button class="mini-btn rras" title="Re-roll as someone else here">↻ as…</button>` : ''}
-      <button class="mini-btn say" title="Say it out loud, in her voice">🔊</button>` : ''}
+      <button class="mini-btn say" title="Say it out loud, in her voice">${icoHTML('i-speaker')}</button>` : ''}
       <button class="mini-btn ed" title="Edit this message">✎</button>
       <button class="mini-btn danger-btn rm" title="Delete this message">✕</button>
     </div>`;
@@ -2175,7 +2268,7 @@ function showTool(tp) {
   const div = document.createElement('div');
   div.className = 'msg assistant';
   div.innerHTML = `
-    <div class="msg-ava">✨</div>
+    <div class="msg-ava">${icoHTML('i-sparkle')}</div>
     <div class="msg-body">
       <div class="tool-card">
         <div class="tc-head">
@@ -2749,6 +2842,8 @@ const GROUP_BLURB = {
   scene: 'Injected into the chat while you play.',
   cast: 'Only when more than one character is in the room. A solo chat never sees any of it.',
   forge: 'Used by the scenario forge when brainstorming.',
+  recipes: 'The brief handed to the prompt-writer for each studio shot. '
+        + 'Edit one and every future draft of that shot follows.',
   system: 'Background machinery. Keep the output formats intact or the '
         + 'features that parse them will stop working.',
 };
@@ -2767,7 +2862,10 @@ async function loadPrompts() {
   wrap.innerHTML = '';
   const byGroup = {};
   for (const p of r.prompts) (byGroup[p.group] ||= []).push(p);
-  for (const group of ['scene', 'cast', 'forge', 'system']) {
+  // 'recipes' was registered into prompts.DEFAULTS from day one and never
+  // rendered here — nine editable layers reachable only by curl, while
+  // CLAUDE.md claimed they were in the UI.
+  for (const group of ['scene', 'cast', 'forge', 'recipes', 'system']) {
     const items = byGroup[group] || [];
     if (!items.length) continue;
     const block = document.createElement('div');
@@ -2894,7 +2992,8 @@ async function loadStudio() {
   for (const r of d.recipes) {
     const b = document.createElement('button');
     b.className = 'recipe-btn';
-    b.innerHTML = `<span class="ri">${esc(r.icon)}</span><span class="rl">${esc(r.label)}</span>`;
+    b.innerHTML = `<span class="ri">${r.icon && r.icon.startsWith('i-')
+      ? icoHTML(r.icon) : esc(r.icon)}</span><span class="rl">${esc(r.label)}</span>`;
     b.title = r.blurb;
     b.onclick = () => openRecipe(r);
     grid.appendChild(b);
@@ -2937,7 +3036,7 @@ async function saveStages() {
 function openRecipe(r) {
   S.recipe = r;
   $('recipeOptsBlock').hidden = false;
-  $('recipeOptsTitle').textContent = `${r.icon} ${r.label}`;
+  $('recipeOptsTitle').textContent = r.label;
   const box = $('recipeOpts');
   box.innerHTML = `<p class="hint">${esc(r.blurb)}</p>`;
   for (const [key, o] of Object.entries(r.options || {})) {
@@ -2963,6 +3062,52 @@ function openRecipe(r) {
   }
   if (!Object.keys(r.options || {}).length) {
     box.innerHTML += '<p class="hint">Nothing to configure, just draft it.</p>';
+  }
+  // Video rides on reference pictures, and "which picture of her" used to be
+  // decided for you — always the card image. Any image from her gallery can
+  // be Picture 2 now. Only offered where it can matter: a recipe that can
+  // target video, a chat with a character, a gallery with images in it.
+  if ((r.media || []).includes('video') && S.chat && S.chat.charId) {
+    api(`/api/gallery/${S.chat.charId}`).then((g) => {
+      const imgs = (g.assets || []).filter((a) => a.kind === 'image');
+      if (!imgs.length || S.recipe !== r) return;
+      const wrap = document.createElement('div');
+      const lab = document.createElement('label');
+      lab.textContent = 'Her reference picture (video)';
+      const hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.dataset.opt = 'her_ref';
+      const row = document.createElement('div');
+      row.className = 'refpick';
+      const pick = (btn, file) => {
+        hidden.value = file;
+        row.querySelectorAll('.refpick-btn').forEach(
+          (b) => b.classList.toggle('sel', b === btn));
+      };
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'refpick-btn sel';
+      card.textContent = 'card image';
+      card.onclick = () => pick(card, '');
+      row.appendChild(card);
+      for (const a of imgs.slice(0, 24)) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'refpick-btn';
+        const im = document.createElement('img');
+        im.src = a.url || `/api/avatars/${a.path}`;
+        im.alt = '';
+        b.appendChild(im);
+        b.onclick = () => pick(b, a.path);
+        row.appendChild(b);
+      }
+      const hint = document.createElement('p');
+      hint.className = 'hint';
+      hint.textContent = 'Which picture of her the video model copies. '
+        + 'Card image is the default.';
+      wrap.append(lab, hidden, row, hint);
+      box.appendChild(wrap);
+    });
   }
 }
 
@@ -3018,6 +3163,58 @@ $('recipeDraft').onclick = async () => {
   showStudioDraft(d);
 };
 
+// /api/studio/approve streams SSE now. One reader for every approve site:
+// {note} frames narrate (vram parking, fallbacks), {progress} frames tick
+// while ComfyUI works, and the last data frame is the result. The old shape
+// was a single blocking POST whose status text was written BEFORE the await
+// and never updated — a seven-minute video render behind a static
+// "rendering…" is indistinguishable from a hang.
+async function approveStream(id, values, onNote, onProgress) {
+  const resp = await fetch('/api/studio/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, values }),
+  });
+  if ((resp.headers.get('Content-Type') || '').includes('json')) {
+    return resp.json();   // the "no such pending job" 404 is plain JSON
+  }
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let final = { error: 'the stream ended before a result arrived' };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop();
+    for (const part of parts) {
+      const line = part.split('\n').find((l) => l.startsWith('data: '));
+      if (!line) continue;
+      const raw = line.slice(6);
+      if (raw === '[DONE]') continue;
+      let f;
+      try { f = JSON.parse(raw); } catch { continue; }
+      if (f.note) { if (onNote) onNote(f.note); }
+      else if (f.progress) { if (onProgress) onProgress(f.progress); }
+      else if (f.ok || f.error) final = f;
+    }
+  }
+  return final;
+}
+
+// How long this workflow took LAST time on this box, for an honest progress
+// bar. Local because render time is a fact about this machine, not the app.
+function renderHistory() {
+  try { return JSON.parse(localStorage.getItem('coomkit.renders.v1') || '{}'); }
+  catch { return {}; }
+}
+function saveRenderTime(wf, ms) {
+  const h = renderHistory();
+  h[wf] = ms;
+  try { localStorage.setItem('coomkit.renders.v1', JSON.stringify(h)); } catch {}
+}
+
 // The approval card. Same shape as her own tool calls, plus the pre-flight
 // warnings — the ones that cost a whole render to discover otherwise.
 function showStudioDraft(d) {
@@ -3026,15 +3223,17 @@ function showStudioDraft(d) {
   div.className = 'msg assistant';
   const fields = Object.entries(d.values).filter(([k]) => k !== 'emotions');
   div.innerHTML = `
-    <div class="msg-ava">✨</div>
+    <div class="msg-ava">${icoHTML('i-sparkle')}</div>
     <div class="msg-body">
       <div class="tool-card">
         <div class="tc-head">
           <b>${esc(d.recipe.replace(/-/g, ' '))}</b>
           <span class="badge">${esc(d.kind)}</span>
           <span class="badge alt">${esc(d.label)}</span>
-          ${d.refs && d.refs.length ? `<span class="badge alt">refs: ${esc(d.refs.join(', '))}</span>` : ''}
         </div>
+        ${d.refs && d.refs.length ? `<div class="tc-refs">${d.refs.map((r) => (typeof r === 'string'
+          ? `<span class="badge alt">${esc(r)}</span>`
+          : `<span class="tc-refchip"><img src="/api/avatars/${esc(r.file)}" alt=""> ${esc(r.label)}</span>`)).join('')}</div>` : ''}
         ${(d.review || []).map((w) => `<p class="tc-warn">⚠ ${esc(w)}</p>`).join('')}
         ${fields.map(([k, v]) => `
           <label class="tc-field">${esc(k.replace(/_/g, ' '))}
@@ -3058,12 +3257,42 @@ function showStudioDraft(d) {
     div.querySelectorAll('[data-val]').forEach((t) => { values[t.dataset.val] = t.value; });
     status.textContent = d.vram_gb >= 20
       ? 'making room on the GPU…' : 'rendering on your box…';
-    const r = await post('/api/studio/approve', { id: d.id, values });
+    // Video is the one kind long enough to deserve a bar. Scaled against
+    // this box's LAST render of the same workflow when one is known;
+    // otherwise it crawls, which is at least honest about not knowing.
+    const expect = d.kind === 'video' ? renderHistory()[d.workflow] : 0;
+    let bar = null;
+    let fill = null;
+    if (d.kind === 'video') {
+      bar = document.createElement('div');
+      bar.className = 'tc-progress';
+      fill = document.createElement('div');
+      fill.className = 'tc-progress-fill' + (expect ? '' : ' crawl');
+      bar.appendChild(fill);
+      status.after(bar);
+    }
+    const t0 = Date.now();
+    const r = await approveStream(d.id, values,
+      (m) => { status.textContent = m; },
+      (p) => {
+        if (p.queue != null && p.queue > 0) {
+          status.textContent = `queued behind ${p.queue} job(s)…`;
+          return;
+        }
+        const took = Math.round(p.elapsed);
+        status.textContent = `rendering… ${took}s`
+          + (expect ? ` (last time: ${Math.round(expect / 1000)}s)` : '');
+        if (fill && expect) {
+          fill.style.width = `${Math.min(97, (p.elapsed * 1000 / expect) * 100)}%`;
+        }
+      });
+    if (bar) bar.remove();
     if (r.error) {
       status.textContent = 'failed: ' + r.error;
       go.disabled = false;
       return;
     }
+    if (d.kind === 'video') saveRenderTime(d.workflow, Date.now() - t0);
     status.textContent = `done · ${r.workflow}`;
     const card = div.querySelector('.tool-card');
     card.querySelectorAll('.tc-field').forEach((f) => f.remove());
@@ -3232,6 +3461,23 @@ function renderCast() {
       t.onclick = () => castEdit({ op: 'present', character_id: c.character_id,
                                    present: !c.present });
       chip.appendChild(t);
+      // The API's op:remove existed from day one; no UI ever called it, so
+      // a guest who was never coming back sat in the strip forever — the
+      // reviewer was right. Removal is for "she's gone from this story":
+      // her past lines keep her name and face via the tombstone machinery,
+      // and off-stage stays the softer option beside it.
+      const x = document.createElement('button');
+      x.className = 'cast-x';
+      x.textContent = '✕';
+      x.title = 'remove her from this scene for good (her old lines keep '
+        + 'her name)';
+      x.onclick = () => {
+        if (!confirm(`Remove ${c.name} from this scene entirely? Her past `
+          + 'messages keep her name and face; she just stops being part '
+          + 'of the cast.')) return;
+        castEdit({ op: 'remove', character_id: c.character_id });
+      };
+      chip.appendChild(x);
     }
     chips.appendChild(chip);
   }
@@ -3264,6 +3510,11 @@ async function castEdit(body) {
 }
 
 $('btnPlainChat').onclick = () => openPlainChat();
+// The empty-state button was the ONLY door, and the empty state is hidden
+// the moment any chat is open — so with one character in the roster a plain
+// chat was unreachable without deleting her chats first. The roster footer
+// is always on screen.
+$('plainChatBtn').onclick = () => openPlainChat();
 
 $('btnCast').onclick = () => {
   if (!S.chat) { toast('open a chat first'); return; }
@@ -3410,7 +3661,9 @@ async function renderVram(known) {
   $('vramPolicy').value = v.policy || 'off';
   $('vramDriver').value = v.driver || 'none';
   $('vramKcpp').hidden = (v.driver !== 'koboldcpp');
+  $('vramLcpp').hidden = (v.driver !== 'llamacpp');
   if (v.kcpp_url && !$('vramKcppUrl').value) $('vramKcppUrl').value = v.kcpp_url;
+  if (v.lcpp_url && !$('vramLcppUrl').value) $('vramLcppUrl').value = v.lcpp_url;
   const loaded = (v.loaded || []).map((m) =>
     m.context ? `${m.model} @ ${m.context}` : m.model);
   const bits = [];
@@ -3422,6 +3675,9 @@ async function renderVram(known) {
   // act. Say which of the two is wrong rather than "it didn't work".
   if (v.driver === 'koboldcpp' && !v.kcpp_up) {
     bits.push(`nothing answering at ${v.kcpp_url || 'the KoboldCpp address'}`);
+  }
+  if (v.driver === 'llamacpp' && !v.lcpp_up) {
+    bits.push(`nothing answering at ${v.lcpp_url || 'the llama-server address'}`);
   }
   if (v.problem) bits.push(v.problem);
   if ((v.parked || []).length) {
@@ -3439,8 +3695,11 @@ async function saveVram(patch, said) {
   // in unconditionally the moment anyone turned the policy on.
   if (vram.policy !== 'off' && (!vram.driver || vram.driver === 'none')) {
     const probe = await api('/api/vram');
-    vram.driver = probe && probe.lms_available === false && probe.kcpp_up
-      ? 'koboldcpp' : 'lmstudio';
+    vram.driver = 'lmstudio';
+    if (probe && probe.lms_available === false) {
+      if (probe.kcpp_up) vram.driver = 'koboldcpp';
+      else if (probe.lcpp_up) vram.driver = 'llamacpp';
+    }
   }
   await post('/api/config', { vram });
   toast(said);
@@ -3451,12 +3710,18 @@ $('vramPolicy').onchange = () =>
   saveVram({ policy: $('vramPolicy').value }, 'GPU policy: ' + $('vramPolicy').value);
 $('vramDriver').onchange = () => {
   $('vramKcpp').hidden = $('vramDriver').value !== 'koboldcpp';
+  $('vramLcpp').hidden = $('vramDriver').value !== 'llamacpp';
   saveVram({ driver: $('vramDriver').value }, 'driver: ' + $('vramDriver').value);
 };
 for (const id of ['vramKcppUrl', 'vramKcppKey']) {
   $(id).onchange = () => saveVram(
     { kcpp_url: $('vramKcppUrl').value.trim(),
       kcpp_key: $('vramKcppKey').value }, 'KoboldCpp settings saved');
+}
+for (const id of ['vramLcppUrl', 'vramLcppKey']) {
+  $(id).onchange = () => saveVram(
+    { lcpp_url: $('vramLcppUrl').value.trim(),
+      lcpp_key: $('vramLcppKey').value }, 'llama-server settings saved');
 }
 $('vramRestore').onclick = async () => {
   toast('reloading…');
@@ -4307,6 +4572,14 @@ async function openBlocks() {
 async function loadBlocksFor(presetId) {
   const p = S.presets.find((x) => String(x.id) === String(presetId));
   if (!p) { $('blkList').innerHTML = '<p class="note">no preset selected</p>'; return; }
+  // Flush a pending autosave before replacing the list. Switching preset
+  // used to silently discard whatever was just picked — the exact way the
+  // POV radios earned their "does NOTHING" bug report.
+  if (S.blk.dirty && S.blk.presetId
+      && String(S.blk.presetId) !== String(p.id)) {
+    clearTimeout(blkSaveTimer);
+    await saveBlocks(true);
+  }
   S.blk.presetId = p.id;
   // Mirror the server's blocks.merge(): built-ins the stored preset has
   // never heard of are appended, disabled or not as they ship. The server
@@ -4330,7 +4603,24 @@ function mergeBlocks(stored, defaults) {
   }
   return out;
 }
-$('blkContext').oninput = renderBlocks;
+// Any change to the block list saves itself, debounced. The old model was a
+// write-only dirty flag and a button labelled "save order": a radio named
+// "First person" that does nothing until an unrelated-sounding button is
+// pressed reads as a dead control, and switching preset discarded the pick
+// without a word. The pick is the save now — same policy the inspector's
+// turn-off button already had.
+let blkSaveTimer = 0;
+function blkChanged(repaint = true) {
+  S.blk.dirty = true;
+  if (repaint) renderBlocks();
+  if (!S.blk.presetId) return;   // the rail already says why, in red
+  clearTimeout(blkSaveTimer);
+  blkSaveTimer = setTimeout(async () => {
+    if (S.blk.dirty && await saveBlocks(true)) toast('prompt saved');
+  }, 600);
+}
+
+$('blkContext').oninput = () => blkChanged();
 $('blkCtxDetect').onclick = async () => {
   const r = await post('/api/context/probe',
     { backend: S.llm.backend, model: S.llm.model });
@@ -4341,8 +4631,7 @@ $('blkCtxDetect').onclick = async () => {
   // will JIT-load at its default. Say so and leave the number alone.
   if (!r.context) { toast(r.note || 'that model is not loaded'); return; }
   $('blkContext').value = r.context;
-  S.blk.dirty = true;
-  renderBlocks();
+  blkChanged();
   toast(r.note ? r.note
     : (r.max && r.max !== r.context
        ? `loaded at ${r.context.toLocaleString()} (supports ${r.max.toLocaleString()})`
@@ -4380,9 +4669,46 @@ $('blkRailFull').onclick = () => { openSettings('blocks'); openBlocks(); };
 $('blkRailInspect').onclick = () => $('btnInspect').click();
 $('blkRailSave').onclick = () => $('blkSave').click();
 
+// Enabled-state and fires-THIS-TURN are different questions, and the panel
+// used to conflate them: "Texting mode ☑" with a token price sat in every RP
+// chat, reading as "SMS is on" when the server sends that layer only in a
+// texting thread. The server decides per-turn whether a layer has content;
+// the client knows enough of that state to say so honestly. Returns a short
+// reason string when the block is enabled but idle for the open chat, else
+// null.
+function blockDormant(b) {
+  if (!b.enabled) return null;
+  const key = b.layer || b.id;
+  const inSms = !!(S.chat && S.chat.mode === 'sms');
+  const castOn = (S.cast || []).filter((c) => c.present && !c.tombstone).length > 1;
+  const someoneGone = (S.cast || []).some((c) => !c.present && !c.tombstone);
+  switch (key) {
+    case 'sms':
+      return inSms ? null : 'texting threads only — idle in this chat';
+    case 'thinking_character':
+      return $('thinkMode').value === 'character' ? null
+        : "idle until thinking is set to 'in-character' (scene tab)";
+    case 'director':
+    case 'director_note':
+      return S.directorOn ? null : 'idle while the director bar is closed';
+    case 'cast_turn':
+      return castOn ? null : 'idle until several characters share the scene';
+    case 'cast_absent':
+      return (castOn || someoneGone) ? null
+        : 'idle until someone leaves the scene';
+    case 'rp':
+      return inSms ? null : 'texting threads only — idle in this chat';
+    case 'tools':
+      return S.tools ? null : 'idle — generation tools are switched off';
+    default:
+      return null;
+  }
+}
+
 function blockTokens(b) {
   if (!b.enabled) return 0;
   if (b.kind === 'marker') return 0;      // engine-filled; counted at send time
+  if (blockDormant(b)) return 0;          // enabled but idle for this chat
   // A built-in text block carries no content of its own: its text lives in
   // prompts.py under `layer`. Counting b.content alone reported ZERO for
   // every shipped block, so a fresh install opened the prompt panel and was
@@ -4507,8 +4833,7 @@ function exclusiveSet(exName, members, compact) {
       <input type="radio" name="${radio}"${on ? '' : ' checked'}> off</label>`;
   head.querySelector('input').onchange = () => {
     for (const x of S.blk.list) if (x.exclusive === exName) x.enabled = false;
-    S.blk.dirty = true;
-    renderBlocks();
+    blkChanged();
   };
   wrap.appendChild(head);
   for (const m of members) {
@@ -4519,12 +4844,14 @@ function exclusiveSet(exName, members, compact) {
 
 function blockRow(b, compact, ex) {
   const row = document.createElement('div');
+  const dormant = blockDormant(b);
   row.className = 'blk-row' + (b.enabled ? '' : ' off')
-    + (compact ? ' tight' : '');
+    + (dormant ? ' dormant' : '') + (compact ? ' tight' : '');
   row.draggable = !compact;
   row.dataset.id = b.id;
   const tok = blockTokens(b);
   const tags = [];
+  if (dormant) tags.push(`<span class="blk-tag idle" title="${esc(dormant)}">idle</span>`);
   if (b.kind === 'marker') tags.push(`<span class="blk-tag mk">${esc(b.marker)}</span>`);
   if (b.role && b.role !== 'system' && b.kind !== 'marker')
     tags.push(`<span class="blk-tag role">${esc(b.role)}</span>`);
@@ -4559,7 +4886,7 @@ function blockRow(b, compact, ex) {
     } else {
       b.enabled = e.target.checked;
     }
-    S.blk.dirty = true; renderBlocks();
+    blkChanged();
   };
   row.querySelector('.blk-up').onclick = () => move(idx(), -1);
   row.querySelector('.blk-down').onclick = () => move(idx(), 1);
@@ -4577,8 +4904,7 @@ function blockRow(b, compact, ex) {
     if (from < 0 || to < 0 || from === to) return;
     const [m] = S.blk.list.splice(from, 1);
     S.blk.list.splice(to, 0, m);
-    S.blk.dirty = true;
-    renderBlocks();
+    blkChanged();
   };
   return row;
 }
@@ -4588,8 +4914,7 @@ function move(i, d) {
   if (i < 0 || j < 0 || j >= S.blk.list.length) return;
   const [m] = S.blk.list.splice(i, 1);
   S.blk.list.splice(j, 0, m);
-  S.blk.dirty = true;
-  renderBlocks();
+  blkChanged();
 }
 
 function editBlock(b, row) {
@@ -4612,12 +4937,22 @@ function editBlock(b, row) {
          <label>depth <input class="be-depth" type="number" min="0" value="${b.depth || 0}"></label>
          <label>exclusive group <span class="lbl-hint">blocks sharing a name are a radio set, only the first enabled one is sent</span>
            <input class="be-ex" value="${esc(b.exclusive || '')}" placeholder="e.g. pov"></label>
-         <label>content <textarea class="be-content" rows="8">${esc(b.content || '')}</textarea></label>`}
+         ${b.layer
+      // A layer-backed block's text is REPLACED at assembly by the prompt
+      // layer, so an editable content box here was a lie — text typed into
+      // it was silently discarded. Show the real text and point at the one
+      // place it can actually be edited.
+      ? `<label>text (lives in settings → prompts${b.layer.startsWith('__') ? ', from the preset/card' : ''})
+           <textarea class="be-content-ro" rows="6" readonly>${esc(PROMPT_TEXT[b.layer] || '(filled from the preset or the card at send time)')}</textarea></label>
+         ${b.layer.startsWith('__') ? '' : `<button class="mini-btn be-jump" data-layer="${esc(b.layer)}">edit the text</button>`}`
+      : `<label>content <textarea class="be-content" rows="8">${esc(b.content || '')}</textarea></label>`}`}
     <div class="row-btns">
       <button class="primary-btn be-ok">apply</button>
       ${b.builtin ? '' : '<button class="ghost-btn danger-btn be-del">delete</button>'}
     </div>`;
   row.after(pane);
+  const jump = pane.querySelector('.be-jump');
+  if (jump) jump.onclick = () => { openSettings('prompts'); };
   pane.querySelector('.be-ok').onclick = () => {
     b.name = pane.querySelector('.be-name').value.trim() || b.name;
     b.why = pane.querySelector('.be-why').value.trim();
@@ -4626,16 +4961,15 @@ function editBlock(b, row) {
       b.place = pane.querySelector('.be-place').value;
       b.depth = Number(pane.querySelector('.be-depth').value) || 0;
       b.exclusive = pane.querySelector('.be-ex').value.trim();
-      b.content = pane.querySelector('.be-content').value;
+      const content = pane.querySelector('.be-content');
+      if (content) b.content = content.value;
     }
-    S.blk.dirty = true;
-    renderBlocks();
+    blkChanged();
   };
   const del = pane.querySelector('.be-del');
   if (del) del.onclick = () => {
     S.blk.list = S.blk.list.filter((x) => x.id !== b.id);
-    S.blk.dirty = true;
-    renderBlocks();
+    blkChanged();
   };
 }
 
@@ -4648,8 +4982,7 @@ $('blkAdd').onclick = () => {
     role: 'system', kind: 'text', marker: '', place: 'order', depth: 0,
     enabled: true, exclusive: '', models: [], builtin: false, layer: '' };
   S.blk.list.splice(at < 0 ? S.blk.list.length : at, 0, nb);
-  S.blk.dirty = true;
-  renderBlocks();
+  blkChanged();
   const row = [...document.querySelectorAll('.blk-row')].find((r) => r.dataset.id === id);
   if (row) row.querySelector('.blk-edit').click();
 };
@@ -4678,9 +5011,8 @@ $('blkLibBtn').onclick = () => {
       const at = S.blk.list.findIndex((x) => x.marker === 'history');
       S.blk.list.splice(at < 0 ? S.blk.list.length : at, 0,
         Object.assign({}, b, { enabled: true }));
-      S.blk.dirty = true;
+      blkChanged();
       add.textContent = 'added'; add.disabled = true;
-      renderBlocks();
     };
     el.appendChild(add);
     list.appendChild(el);
@@ -5251,7 +5583,12 @@ function phoneStudio(p) {
   go.onclick = async () => {
     go.disabled = no.disabled = true;
     $('phoneStatus').textContent = 'sending a photo…';
-    const r = await post('/api/studio/approve', { id: p.id });
+    const r = await approveStream(p.id, undefined,
+      (m) => { $('phoneStatus').textContent = m; },
+      (pr) => {
+        $('phoneStatus').textContent = pr.queue > 0
+          ? `queued…` : `making it… ${Math.round(pr.elapsed)}s`;
+      });
     $('phoneStatus').textContent = 'online';
     if (r.error) { card.innerHTML = `<span style="opacity:.7">couldn't send: ${esc(r.error)}</span>`; return; }
     card.remove();
@@ -5324,8 +5661,14 @@ $('phoneEmojiBtn').onclick = () => {
     box.appendChild(b);
   }
 };
-$('phoneClose').onclick = () => { $('phone').hidden = true; $('phoneTab').hidden = true; };
+$('phoneClose').onclick = () => {
+  // On a phone the overlay IS the app; closing it must land somewhere,
+  // not on a blank page.
+  if (MOBILE.matches) { $('phone').hidden = true; openMobileHome(); return; }
+  $('phone').hidden = true; $('phoneTab').hidden = true;
+};
 $('phoneMin').onclick = () => {
+  if (MOBILE.matches) { $('phone').hidden = true; openMobileHome(); return; }
   $('phone').hidden = true;
   $('phoneTabName').textContent = S.phone.chat ? S.phone.chat.name : 'messages';
   $('phoneTab').hidden = false;
@@ -5335,6 +5678,133 @@ $('phoneTab').onclick = () => {
   $('phoneTab').hidden = true;
   $('phoneTabDot').hidden = true;
   $('phoneThread').scrollTop = $('phoneThread').scrollHeight;
+};
+
+// ── mobile: the SMS experience is the app ────────────────────────
+// Termux on the phone, browser at 127.0.0.1:3939. Under 700px the layout is
+// hidden by CSS (its grid minimums clipped the composer off-screen at 400px
+// with no way to scroll to it) and everything routes through the phone
+// overlay plus this home screen. Foldables and tablets clear the gate and
+// get the full UI untouched.
+const MOBILE = matchMedia('(max-width: 700px)');
+
+async function openMobileHome() {
+  $('mobileHome').hidden = false;   // [hidden] beats any class, by design
+  $('mobileHome').classList.add('on');
+  const box = $('mhList');
+  box.innerHTML = '';
+  if (!S.chars.length) {
+    box.innerHTML = '<p class="hint" style="padding: 0 18px">Nobody to text '
+      + 'yet. Import a card with the button below, or pull your desktop '
+      + 'install over: menu → sync.</p>';
+    return;
+  }
+  // One inbox row per character: her newest texting thread's last message
+  // and when it happened, like any SMS app. A character never texted still
+  // gets a row — she is a contact, not nobody.
+  const rows = await Promise.all(S.chars.map(async (c) => {
+    const r = await api(`/api/chats?character_id=${c.id}&mode=sms`);
+    return { c, chat: ((r && r.chats) || [])[0] || null };
+  }));
+  rows.sort((a, b) => ((b.chat && b.chat.updated) || 0)
+    - ((a.chat && a.chat.updated) || 0));
+  for (const { c, chat } of rows) {
+    const row = document.createElement('button');
+    row.className = 'mh-row';
+    row.dataset.name = c.name.toLowerCase();
+    row.innerHTML = c.avatar
+      ? `<img src="/api/avatars/${esc(c.avatar)}" alt="">`
+      : '<span class="mh-ava">♡</span>';
+    const name = document.createElement('b');
+    name.textContent = c.name;
+    const when = document.createElement('time');
+    when.textContent = chat && chat.updated ? ago(chat.updated) : '';
+    const snip = document.createElement('span');
+    snip.className = 'mh-snip';
+    snip.textContent = chat && chat.snippet
+      ? chat.snippet.replace(/\s+/g, ' ')
+      : 'tap to say hi';
+    row.append(name, when, snip);
+    row.onclick = async () => {
+      $('mobileHome').classList.remove('on');
+      $('mobileHome').hidden = true;
+      await openPhone(c.id);
+    };
+    box.appendChild(row);
+  }
+}
+$('mhSearch').oninput = () => {
+  const q = $('mhSearch').value.trim().toLowerCase();
+  document.querySelectorAll('#mhList .mh-row').forEach((r) => {
+    r.hidden = q && !r.dataset.name.includes(q);
+  });
+};
+$('mhMenu').onclick = (e) => {
+  e.stopPropagation();
+  $('mhMenuPop').hidden = !$('mhMenuPop').hidden;
+};
+document.addEventListener('click', () => { $('mhMenuPop').hidden = true; });
+$('mhFab').onclick = () => $('cardFile').click();
+$('mhSync').onclick = () => openSettings('backends');
+
+async function mobileBoot() {
+  if (!MOBILE.matches) return;
+  // Straight back into the last thread when there is one; the inbox is for
+  // the first open and for switching.
+  const lastSms = Object.keys(S.chatsByChar || {})
+    .filter((k) => k.endsWith(':sms')).map((k) => parseInt(k, 10));
+  const c = S.chars.find((x) => lastSms.includes(x.id)) || null;
+  if (c) await openPhone(c.id);
+  else await openMobileHome();
+}
+$('mhImport').onclick = () => $('cardFile').click();
+$('mhSettings').onclick = () => openSettings('backends');
+
+// ── datapack: one-shot LAN clone ─────────────────────────────────
+// ── server-side texting ──────────────────────────────────────────
+// The daemon has no browser session to borrow a backend from, so enabling
+// captures the picks in hand RIGHT NOW; the note says which ones are stored
+// so a later model switch doesn't silently change who writes her texts.
+function syncTxServer() {
+  const tx = (S.cfg && S.cfg.texting) || {};
+  $('txServer').checked = !!tx.server;
+  $('txNote').textContent = tx.server
+    ? `she texts via ${tx.model || '?'} on ${tx.backend || '?'}` +
+      ' — re-tick to update to your current picks'
+    : '';
+}
+$('txServer').onchange = async () => {
+  const on = $('txServer').checked;
+  if (on && !LLM_READY()) {
+    toast('pick a backend and model first, she needs someone to think with');
+    $('txServer').checked = false;
+    return;
+  }
+  const texting = on
+    ? { server: true, backend: S.llm.backend, model: S.llm.model,
+        preset_id: S.presetId ? +S.presetId : null }
+    : { server: false };
+  await post('/api/config', { texting });
+  S.cfg = Object.assign(S.cfg || {}, { texting });
+  syncTxServer();
+  toast(on ? "the server keeps her schedule now — even with this tab closed"
+           : 'back to texting only while the app is open');
+};
+
+$('dpPull').onclick = async () => {
+  const url = $('dpUrl').value.trim();
+  if (!url) { $('dpNote').textContent = 'type the other install\'s address first'; return; }
+  if (!confirm('Replace EVERYTHING here with that install\'s data? '
+    + 'Your current data survives as data.bak/ on disk.')) return;
+  $('dpPull').disabled = true;
+  $('dpNote').textContent = 'pulling… a big gallery takes a while';
+  const r = await post('/api/datapack/pull',
+    { url, keys: $('dpKeys').checked });
+  $('dpPull').disabled = false;
+  if (r.error) { $('dpNote').textContent = 'failed: ' + r.error; return; }
+  $('dpNote').textContent = `done — ${r.characters} characters, ${r.chats} chats, `
+    + `${r.messages} messages, ${r.assets} renders. Reloading…`;
+  setTimeout(() => location.reload(), 1200);
 };
 
 // Drag it by the status bar. It is a window; it should move like one.
@@ -5366,13 +5836,13 @@ S.wiz = { step: 0, backends: [], picked: null, comfy: null, vram: 'off', ctx: 0,
 
 const WIZ = [
   { id: 'hello',  label: 'hello',      icon: '✦' },
-  { id: 'brain',  label: 'her brain',  icon: '🧠' },
-  { id: 'gpu',    label: 'the GPU',    icon: '🎨' },
-  { id: 'vram',   label: 'vram',       icon: '⚡' },
+  { id: 'brain',  label: 'her brain',  icon: 'i-brain' },
+  { id: 'gpu',    label: 'the GPU',    icon: 'i-palette' },
+  { id: 'vram',   label: 'vram',       icon: 'i-bolt' },
   // Optional, and sits before `blocks` on purpose: an imported SillyTavern
   // preset becomes the preset that the blocks step then targets.
-  { id: 'bring',  label: 'bring your own', icon: '📦' },
-  { id: 'blocks', label: 'her prompt', icon: '🧩' },
+  { id: 'bring',  label: 'bring your own', icon: 'i-box' },
+  { id: 'blocks', label: 'her prompt', icon: 'i-puzzle' },
   { id: 'done',   label: 'done',       icon: '★' },
 ];
 
@@ -5394,7 +5864,7 @@ function wizSay(html, mood = 'smug') {
 function renderWizSteps() {
   $('wizSteps').innerHTML = WIZ.map((w, i) =>
     `<div class="wiz-step${i === S.wiz.step ? ' on' : ''}${i < S.wiz.step ? ' done' : ''}">`
-    + `<i>${i < S.wiz.step ? '✓' : w.icon}</i>${esc(w.label)}</div>`).join('');
+    + `<i>${i < S.wiz.step ? '✓' : (w.icon.startsWith('i-') ? icoHTML(w.icon) : w.icon)}</i>${esc(w.label)}</div>`).join('');
 }
 
 async function openWizard() {
@@ -5915,7 +6385,7 @@ const TOUR = [
     before: () => document.querySelector('.rail-tab[data-rail="studio"]').click(),
     text: `Each one knows what it's asking for, a selfie is deliberately badly
       lit and badly framed, because that's what makes it read as real. And if
-      none of them fit, <b>🪄 Describe it</b> takes plain English and writes it
+      none of them fit, <b>Describe it</b> takes plain English and writes it
       in your model's own dialect. You always see the prompt before anything
       runs.` },
   { el: '#vramBadge', mood: 'laugh', title: 'The GPU',
@@ -6195,6 +6665,9 @@ $('phoneNudge').onclick = async () => {
 };
 
 async function nudgeCheck() {
+  // With the server keeping her schedule, the browser clock stands down
+  // entirely — two schedulers on one thread is how she double-texts.
+  if (S.cfg && S.cfg.texting && S.cfg.texting.server) return;
   const t = S.phone.texting || {};
   if (!t.enabled || !S.phone.chat || S.phone.busy || S.nudge.checking) return;
   if (!LLM_READY()) return;
@@ -6202,9 +6675,14 @@ async function nudgeCheck() {
   // texts first within sixty seconds of the thread being created — before
   // the user has decided who opens.
   if (!S.phone.seen) return;
+  // Her own stated pace (the NEXT line) outranks the configured gap — that
+  // is what makes her feel like she has a clock of her own instead of a
+  // cron job. The gap is the fallback for a model that skipped the form.
+  const nowS = Date.now() / 1000;
+  if (S.phone.nextAt && nowS < S.phone.nextAt) return;
   const gap = (t.gap_minutes || 45) * 60;
-  const since = (Date.now() / 1000) - (S.phone.lastAt || 0);
-  if (since < gap) return;
+  const since = nowS - (S.phone.lastAt || 0);
+  if (!S.phone.nextAt && since < gap) return;
   if ((S.phone.unpromptedToday || 0) >= (t.daily_cap || 6)) return;
 
   S.nudge.checking = true;
@@ -6213,6 +6691,8 @@ async function nudgeCheck() {
     // "sent: false" is a real answer — she looked and had nothing to say. Push
     // the clock forward anyway so we don't ask again in sixty seconds.
     S.phone.lastAt = Date.now() / 1000;
+    S.phone.nextAt = r.next_minutes
+      ? S.phone.lastAt + r.next_minutes * 60 : 0;
     if (r.sent) {
       S.phone.unpromptedToday = (S.phone.unpromptedToday || 0) + 1;
       if ($('phone').hidden) {

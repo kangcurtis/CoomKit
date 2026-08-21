@@ -115,28 +115,29 @@ def default_blocks() -> list:
               enabled=False, builtin=True,
               why="'She leans in.' The default for most cards.",
               content=(
-                  "Narrate in third person limited, from her perspective — "
-                  "'She leans in.' Every turn, the whole scene. Never slip "
-                  "into narrating as 'I', and never address the user as "
-                  "'you' outside her spoken dialogue.")),
+                  "Narrate in third person limited, from the character's "
+                  "perspective: 'She leans in.' Every turn, the whole scene. "
+                  "Never slip into narrating as 'I', and never address the "
+                  "user as 'you' outside the character's spoken dialogue.")),
         block("lib.pov.second", "Second person", "style", exclusive="pov",
               enabled=False, builtin=True,
               why="'You feel her lean in.' More immediate, easier to break.",
               content=(
-                  "Narrate in second person, addressed to the user — 'You "
+                  "Narrate in second person, addressed to the user: 'You "
                   "feel her lean in.' Every turn, the whole scene: the "
-                  "narration calls the user 'you' and describes her in "
-                  "third person. Her spoken lines stay in her own voice "
-                  "inside quotes. Never drift into narrating her as 'I' or "
-                  "into plain third-person narration of the user.")),
+                  "narration calls the user 'you' and describes the "
+                  "character in third person. The character's spoken lines "
+                  "stay in their own voice inside quotes. Never drift into "
+                  "narrating the character as 'I' or into plain third-person "
+                  "narration of the user.")),
         block("lib.pov.first", "First person", "style", exclusive="pov",
               enabled=False, builtin=True,
               why="'I lean in.' She narrates herself.",
               content=(
-                  "Narrate in first person as the character — 'I lean in.' "
-                  "Every turn, the whole scene: she tells it herself as "
+                  "Narrate in first person as the character: 'I lean in.' "
+                  "Every turn, the whole scene: the character tells it as "
                   "'I', and the user is 'you'. Never drift into describing "
-                  "her own actions in third person.")),
+                  "the character's own actions in third person.")),
         block("director", "Director's note", "steering", layer="director",
               builtin=True,
               why="Your stage direction, which she obeys without mentioning."),

@@ -58,6 +58,7 @@ builtins = {
     # browser globals and class syntax
     "btoa", "atob", "setInterval", "clearInterval", "getComputedStyle",
     "requestAnimationFrame", "structuredClone", "constructor", "super",
+    "matchMedia",
     # words that read as calls inside UI strings — "merged 3 duplicate(s)"
     "duplicate",
 }
@@ -117,5 +118,22 @@ assert "S.presets.length" not in _gate_code, \
     "installs the shipped library before the first request, so it is " \
     "permanently false and the wizard can never fire"
 print("first-run gate: does not depend on a table that seeding fills")
+
+# ── the icon sprite ──────────────────────────────────────────────────────
+# Sprite symbols are invisible to the $('id') check above: a <use> against a
+# symbol that does not exist renders an EMPTY BOX with no error and no test
+# failure. So every i-* referenced anywhere — index.html <use> tags, app.js
+# icoHTML('i-…') literals, and the recipe icons the server sends the client —
+# must exist as a <symbol> in the sprite.
+_symbols = set(re.findall(r'<symbol id="(i-[\w-]+)"', html))
+assert _symbols, "the icon sprite is missing from index.html"
+_used = set(re.findall(r'href="#(i-[\w-]+)"', html))
+_used |= set(re.findall(r"icoHTML\('(i-[\w-]+)'\)", js))
+import recipes as _recipes
+_used |= {r.get("icon") for r in _recipes.RECIPES.values()
+          if str(r.get("icon", "")).startswith("i-")}
+_missing = _used - _symbols
+assert not _missing, f"icons referenced but not in the sprite: {_missing}"
+print(f"icon sprite: {len(_symbols)} symbols, {len(_used)} referenced, all resolve")
 
 print("FRONTEND WIRING OK")

@@ -13,7 +13,9 @@ right setting for anyone with two GPUs or 80 GB of one.
 
 Drivers:
   lmstudio   `lms` CLI (load/unload) + REST for state. Ships with LM Studio.
-  command    user-supplied shell commands, for llama.cpp/TabbyAPI/whatever.
+  llamacpp   llama-server in ROUTER mode: POST /models/unload + /models/load.
+  koboldcpp  admin-mode reload_config with the two special targets.
+  command    user-supplied shell commands, for TabbyAPI/vLLM/whatever.
   none       never unload the LLM (default).
 
 ComfyUI is asked to release with POST /free {unload_models, free_memory} —
@@ -43,6 +45,8 @@ DEFAULTS = {
     "lms_bin": "lms",
     "kcpp_url": "http://127.0.0.1:5001",   # driver=koboldcpp
     "kcpp_key": "",           # driver=koboldcpp; --adminpassword, if set
+    "lcpp_url": "http://127.0.0.1:8080",   # driver=llamacpp (router mode)
+    "lcpp_key": "",           # driver=llamacpp; --api-key, if set
     "unload_cmd": "",         # driver=command
     "load_cmd": "",           # driver=command; {model} {context} substituted
     "load_timeout_s": 300,
@@ -239,6 +243,147 @@ def kcpp_wait(base: str, want_llm: bool, key: str = "",
     return False
 
 
+# --------------------------------------------------------------------------
+# llama.cpp llama-server driver
+#
+# llama-server grew real model management: launched with NO -m it runs as a
+# ROUTER that spawns one instance per model, and `POST /models/load` /
+# `POST /models/unload` start and stop them over HTTP. The instance's args
+# (context, offload, mmproj) live server-side — in the router's --models-dir
+# scan or --models-preset INI — so a reload is faithful by construction, the
+# same trust the KoboldCpp driver puts in `initial_model`. Nothing has to be
+# captured, which is what the generic `command` driver cannot offer.
+#
+# Launched the classic way (`-m model.gguf`) those routes DO NOT EXIST — the
+# only parking is the automatic `--sleep-idle-seconds` timer. The driver
+# detects that shape and says so instead of pretending: GET /models answers in
+# both modes, but only router entries carry a `status` object.
+#
+# Three protocol facts the code leans on, all verified against a live build
+# (2026-08-21):
+#   · a failed instance load reports {"value": "unloaded", "failed": true,
+#     "exit_code": N} — the wait must bail on `failed`, not sit out the
+#     timeout (measured: an OOM'd 12B died in 1.4s; the naive poll waited
+#     120s for a "loaded" that could never come);
+#   · GET /models is exempt from the idle timer, so polling it neither wakes
+#     a sleeping model nor postpones anyone's sleep;
+#   · a `sleeping` model has already left the card (the instance destroys its
+#     model and KV on sleep) and reloads ITSELF on the next request — so it
+#     is skipped, never unloaded, and never recorded as a debt.
+# --------------------------------------------------------------------------
+
+def lcpp_base(url: str) -> str:
+    """Normalise a llama-server URL to its root.
+
+    Same job as kcpp_base: the URL the user has to hand is the OpenAI one
+    ending in /v1, the management API lives at the root.
+    """
+    base = (url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if "://" not in base:
+        base = "http://" + base
+    if base.endswith("/v1"):
+        base = base[:-3]
+    return base.rstrip("/")
+
+
+def _lcpp_call(base: str, path: str, key: str = "", payload=None,
+               timeout: int = 10):
+    """GET (payload None) or POST JSON. Returns parsed body, or None if the
+    server did not answer / did not send JSON."""
+    if not base:
+        return None
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(base + path, data=data, headers=headers,
+                                 method="POST" if data else "GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def lcpp_models(base: str, key: str = "", timeout: int = 6):
+    """GET /models. Returns the entry list, or None when nothing answered.
+    The None/[] distinction is load-bearing: a dead server must read as
+    "left the LLM alone", not as "no model was loaded"."""
+    r = _lcpp_call(base, "/models", key, timeout=timeout)
+    if not isinstance(r, dict) or not isinstance(r.get("data"), list):
+        return None
+    return r["data"]
+
+
+def lcpp_is_router(models: list) -> bool:
+    """Router entries carry a status object; single-model /models is the
+    plain OpenAI list. Decided over the raw entries, same discipline as the
+    lorebook keyless check."""
+    return any(isinstance(m, dict) and isinstance(m.get("status"), dict)
+               and "value" in m["status"] for m in (models or []))
+
+
+def _lcpp_status(m: dict) -> str:
+    st = m.get("status")
+    return (st.get("value") or "") if isinstance(st, dict) else ""
+
+
+def lcpp_loaded(models: list) -> list[str]:
+    """Ids currently occupying (or about to occupy) the card."""
+    return [m.get("id", "") for m in (models or [])
+            if _lcpp_status(m) in ("loaded", "loading") and m.get("id")]
+
+
+def lcpp_wait(base: str, model: str, want_loaded: bool, key: str = "",
+              timeout_s: float = 300.0, poll: float = 1.0) -> tuple[bool, str]:
+    """Poll GET /models until `model` settles. Bails early when the instance
+    DIED rather than waiting for a state it can never reach."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        models = lcpp_models(base, key, timeout=4)
+        if models is not None:
+            entry = next((m for m in models if m.get("id") == model), None)
+            if entry is None:
+                return False, f"llama-server no longer lists {model}"
+            st = entry.get("status") or {}
+            value = st.get("value", "")
+            if want_loaded and st.get("failed"):
+                code = st.get("exit_code")
+                return False, (f"{model} failed to load"
+                               + (f" (exit code {code})" if code is not None
+                                  else "")
+                               + " — probably not enough free VRAM")
+            if want_loaded and value == "loaded":
+                return True, "loaded"
+            if not want_loaded and value in ("unloaded", "sleeping"):
+                return True, "unloaded"
+        time.sleep(poll)
+    return False, f"timed out waiting for {model} to "\
+                  f"{'load' if want_loaded else 'unload'}"
+
+
+def lcpp_load(base: str, model: str, key: str = "", timeout: int = 20) -> bool:
+    r = _lcpp_call(base, "/models/load", key, payload={"model": model},
+                   timeout=timeout)
+    return bool(r and r.get("success"))
+
+
+def lcpp_unload(base: str, model: str, key: str = "",
+                timeout: int = 20) -> bool:
+    r = _lcpp_call(base, "/models/unload", key, payload={"model": model},
+                   timeout=timeout)
+    return bool(r and r.get("success"))
+
+
+_LCPP_SINGLE = ("llama-server is running single-model (-m); it can only park "
+                "in router mode — start it with no -m and point --models-dir "
+                "at your GGUF folder (each model in its own subfolder, or "
+                "loose .gguf files), or give it --sleep-idle-seconds N and it "
+                "parks itself when idle")
+
+
 def _run(cmd: list, timeout: int = 60) -> tuple[int, str]:
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -394,6 +539,35 @@ def _unload_llm(st: dict) -> tuple[list[dict], str]:
             })
         names = ", ".join(k["model"] for k in keep) or "nothing"
         return keep, f"unloaded {names}"
+    if driver == "llamacpp":
+        base = lcpp_base(st.get("lcpp_url", ""))
+        key = st.get("lcpp_key", "")
+        if not base:
+            return [], "no llama-server address set"
+        models = lcpp_models(base, key)
+        if models is None:
+            return [], f"nothing answering at {base} — left the LLM alone"
+        if not lcpp_is_router(models):
+            return [], _LCPP_SINGLE
+        loaded = lcpp_loaded(models)
+        if not loaded:
+            return [], "no llama-server model was loaded"
+        parked_now, failed = [], []
+        for mid in loaded:
+            if not lcpp_unload(base, mid, key):
+                failed.append(mid)
+                continue
+            ok, why = lcpp_wait(base, mid, False, key, timeout_s=60)
+            if ok:
+                parked_now.append({"driver": "llamacpp", "model": mid,
+                                   "url": base})
+            else:
+                failed.append(f"{mid} ({why})")
+        note = "unloaded " + (", ".join(p["model"] for p in parked_now)
+                              or "nothing")
+        if failed:
+            note += " — could not unload " + ", ".join(failed)
+        return parked_now, note
     if driver == "koboldcpp":
         base = kcpp_base(st.get("kcpp_url", ""))
         if not base:
@@ -463,6 +637,19 @@ def _reload_llm(entry: dict, st: dict) -> tuple[bool, str]:
         if entry.get("ttl_s"):
             bits.append(f"ttl {entry['ttl_s']}s")
         return ok, (" ".join(bits) if ok else f"reload failed: {out[:200]}")
+    if entry.get("driver") == "llamacpp":
+        base = entry.get("url") or lcpp_base(st.get("lcpp_url", ""))
+        key = st.get("lcpp_key", "")
+        want = entry.get("model") or ""
+        if not want:
+            return False, "parked entry names no model"
+        if not lcpp_load(base, want, key):
+            return False, "llama-server refused the load"
+        ok, why = lcpp_wait(base, want, True, key,
+                            timeout_s=float(st.get("load_timeout_s", 300)))
+        # The instance args live in the router's own preset, so a successful
+        # load IS the faithful restore — context, offload, mmproj and all.
+        return ok, (f"reloaded {want}" if ok else why)
     if entry.get("driver") == "koboldcpp":
         base = entry.get("url") or kcpp_base(st.get("kcpp_url", ""))
         key = st.get("kcpp_key", "")
@@ -544,6 +731,39 @@ def ensure_model(cfg: dict, backend: str, model: str, context_tokens: int = 0,
     say = note or (lambda _m: None)
     if st["policy"] == "off":
         return False, ("GPU policy is off, so I left your loaded models alone")
+    if st.get("driver") == "llamacpp":
+        # The gate is identity, not vibes: the request's backend must BE the
+        # router this driver is configured to touch. An OpenRouter 404 or a
+        # typo'd LAN box must never unload anything here.
+        base = lcpp_base(st.get("lcpp_url", ""))
+        if not base or lcpp_base(backend) != base:
+            return False, "no driver that can swap models on this backend"
+        key = st.get("lcpp_key", "")
+        want = (model or "").strip()
+        if not want:
+            return False, "no model named"
+        models = lcpp_models(base, key)
+        if models is None:
+            return False, f"nothing answering at {base}"
+        if not lcpp_is_router(models):
+            return False, _LCPP_SINGLE
+        if not any(m.get("id") == want for m in models):
+            return False, f"llama-server does not list {want}"
+        loaded = lcpp_loaded(models)
+        if want in loaded:
+            return False, "already loaded"
+        others = ", ".join(m for m in loaded if m != want) or "nothing"
+        say(f"{want} is not loaded and {others} is holding the card — swapping")
+        for mid in loaded:
+            if lcpp_unload(base, mid, key):
+                lcpp_wait(base, mid, False, key, timeout_s=60)
+        if not lcpp_load(base, want, key):
+            return False, f"unloaded {others} but llama-server refused {want}"
+        ok, why = lcpp_wait(base, want, True, key,
+                            timeout_s=float(st.get("load_timeout_s", 300)))
+        if not ok:
+            return False, f"unloaded {others} but {why}"
+        return True, f"swapped {others} out for {want}"
     if st.get("driver") != "lmstudio" or not is_lmstudio(backend):
         return False, "no driver that can swap models on this backend"
     binp = st.get("lms_bin", "lms")
@@ -559,7 +779,7 @@ def ensure_model(cfg: dict, backend: str, model: str, context_tokens: int = 0,
             return False, "already loaded"
 
     others = ", ".join((m.get("modelKey") or "?") for m in loaded) or "nothing"
-    say(f"🧠 {want} is not loaded and {others} is holding the card — swapping")
+    say(f"{want} is not loaded and {others} is holding the card — swapping")
     if loaded:
         ok, out = lms_unload_all(binp)
         if not ok:
@@ -623,7 +843,7 @@ def make_room(cfg: dict, comfy_url: str, need_gb: float,
                           if (e.get("driver"), e.get("model")) not in seen]
             _parked.extend(unloaded)
             _save_parked()
-            say(f"🧠 {msg} to make room on the GPU")
+            say(f"{msg} to make room on the GPU")
 
         # ComfyUI may itself be sitting on a model from a previous job of a
         # different kind (an image model when the next job is video).
@@ -667,7 +887,7 @@ def give_back(cfg: dict, comfy_url: str, report: dict, note=None) -> dict:
                 need = sum((e.get("context") or 0) for e in entries) and 1.0
                 wait_for_free(comfy_url, need or 1.0, timeout_s=20.0)
             for entry in entries:
-                say("🧠 loading your chat model back onto the GPU…")
+                say("loading your chat model back onto the GPU…")
                 ok, msg = _reload_llm(entry, st)
                 out["steps"].append(msg)
                 if ok:
@@ -716,6 +936,8 @@ def status(cfg: dict, comfy_url: str) -> dict:
         info["lms_available"] = lms_available(st.get("lms_bin", "lms"))
         info["kcpp_up"] = bool(kcpp_caps(kcpp_base(st.get("kcpp_url", "")),
                                          st.get("kcpp_key", "")))
+        info["lcpp_up"] = lcpp_models(lcpp_base(st.get("lcpp_url", "")),
+                                      st.get("lcpp_key", "")) is not None
     if st["driver"] == "koboldcpp":
         base = kcpp_base(st.get("kcpp_url", ""))
         caps = kcpp_caps(base, st.get("kcpp_key", ""))
@@ -729,6 +951,21 @@ def status(cfg: dict, comfy_url: str) -> dict:
         if caps and not caps.get("admin"):
             info["problem"] = ("KoboldCpp is running but not in admin mode — "
                                "restart it with --admin --admindir <folder>")
+    if st["driver"] == "llamacpp":
+        base = lcpp_base(st.get("lcpp_url", ""))
+        key = st.get("lcpp_key", "")
+        models = lcpp_models(base, key)
+        info["lcpp_url"] = base
+        info["lcpp_up"] = models is not None
+        router = lcpp_is_router(models or [])
+        info["lcpp_router"] = router
+        info["loaded"] = [
+            {"model": m.get("id"), "context": None, "size_gb": None,
+             "status": _lcpp_status(m)}
+            for m in (models or [])
+            if _lcpp_status(m) in ("loaded", "loading", "sleeping")]
+        if models is not None and not router:
+            info["problem"] = _LCPP_SINGLE
     if st["driver"] == "lmstudio":
         binp = st.get("lms_bin", "lms")
         info["lms_available"] = lms_available(binp)

@@ -8,6 +8,7 @@ Port 3939 by default. No pip, no build step, no telemetry.
 import base64
 import binascii
 import json
+import os
 import random
 import re
 import sqlite3
@@ -293,7 +294,8 @@ CREATE TABLE IF NOT EXISTS memories (
     character_id INTEGER,
     kind TEXT DEFAULT 'fact',
     content TEXT NOT NULL,
-    created REAL, updated REAL
+    created REAL, updated REAL,
+    persona_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS presets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -399,6 +401,9 @@ MIGRATIONS = {
     "assets": [("character_id", "INTEGER"), ("recipe", "TEXT DEFAULT ''")],
     "characters": [("fav", "INTEGER NOT NULL DEFAULT 0")],
     "chats": [("title", "TEXT")],
+    # NULL = shared with every persona; that is what every pre-existing row
+    # means, so the migration is also the correct backfill.
+    "memories": [("persona_id", "INTEGER")],
 }
 
 
@@ -413,7 +418,8 @@ MIGRATIONS = {
 # because this number changed. Forget the bump and every lorebook route 500s
 # with "no such table" on every database that already exists, which reads as
 # the feature being completely broken while the code is correct.
-SCHEMA_VERSION = 5
+# 6: memories.persona_id (per-persona memory buckets, NULL = shared).
+SCHEMA_VERSION = 6
 
 
 def get_db() -> sqlite3.Connection:
@@ -999,6 +1005,8 @@ class Handler(BaseHTTPRequestHandler):
                 if rb.get("key"):
                     rb["key"] = rb["key"][:6] + "..."  # never leak full keys
             self._json(cfg)
+        elif url.path == "/api/datapack":
+            self._datapack_get(urllib.parse.parse_qs(url.query))
         elif url.path == "/api/chats":
             self._chats_list(urllib.parse.parse_qs(url.query))
         elif url.path == "/api/characters":
@@ -1074,7 +1082,7 @@ class Handler(BaseHTTPRequestHandler):
             incoming = self._body()
             cfg = load_config()
             for key in ("comfyui_url", "defaults", "vram", "studio",
-                        "comfy_timeout", "setup"):
+                        "comfy_timeout", "setup", "host", "texting"):
                 if key in incoming:
                     cfg[key] = incoming[key]
             if "remote_backends" in incoming:
@@ -1091,6 +1099,8 @@ class Handler(BaseHTTPRequestHandler):
             self._chat_preview()
         elif url.path == "/api/library/install":
             self._library_install()
+        elif url.path == "/api/datapack/pull":
+            self._datapack_pull()
         elif (len(parts) == 4 and parts[:2] == ["api", "presets"]
               and parts[2].isdigit() and parts[3] == "blocks"):
             self._blocks_save(int(parts[2]))
@@ -1197,6 +1207,9 @@ class Handler(BaseHTTPRequestHandler):
               and parts[2].isdigit() and parts[3] == "title"):
             self._chat_title(int(parts[2]))
         elif (len(parts) == 4 and parts[:2] == ["api", "chats"]
+              and parts[2].isdigit() and parts[3] == "persona"):
+            self._chat_persona(int(parts[2]))
+        elif (len(parts) == 4 and parts[:2] == ["api", "chats"]
               and parts[2].isdigit() and parts[3] == "opening"):
             self._chat_opening(int(parts[2]))
         elif (len(parts) == 4 and parts[:2] == ["api", "characters"]
@@ -1247,6 +1260,14 @@ class Handler(BaseHTTPRequestHandler):
         elif (len(parts) == 3 and parts[0] == "api" and parts[1] in VALID_TABLES
                 and parts[2].isdigit()):
             ok = rows_delete(parts[1], int(parts[2]))
+            if ok and parts[1] == "personas":
+                # Same reasoning as _character_delete: a deleted persona's
+                # memory bucket can never be read again — for_turn filters on
+                # a persona id that no longer exists — so leaving the rows is
+                # leaving invisible garbage.
+                with get_db() as conn:
+                    conn.execute("DELETE FROM memories WHERE persona_id=?",
+                                 (int(parts[2]),))
             self._json({"ok": ok} if ok else {"error": "not found"},
                        200 if ok else 404)
         else:
@@ -1470,6 +1491,33 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("UPDATE chats SET title=? WHERE id=?",
                          (title, chat_id))
         self._json({"ok": True, "title": title})
+
+    def _chat_persona(self, chat_id: int) -> None:
+        """POST /api/chats/{id}/persona {persona_id|null} — rebind who YOU are.
+
+        This is the write path the persona dropdown never had: chats stored
+        their persona once at creation and nothing could change it, so
+        switching the dropdown mid-chat silently did nothing. Rebinding is
+        safe by the oldest design decision in the file — messages are STORED
+        with {{user}} intact, so the whole history re-resolves to the new
+        name on the next read. Memory follows: the chat now reads and writes
+        the new persona's bucket.
+        """
+        body = self._body()
+        pid = body.get("persona_id")
+        pid = int(pid) if pid else None
+        with get_db() as conn:
+            if not conn.execute("SELECT 1 FROM chats WHERE id=?",
+                                (chat_id,)).fetchone():
+                self._json({"error": "not found"}, 404)
+                return
+            if pid and not conn.execute("SELECT 1 FROM personas WHERE id=?",
+                                        (pid,)).fetchone():
+                self._json({"error": "no such persona"}, 400)
+                return
+            conn.execute("UPDATE chats SET persona_id=? WHERE id=?",
+                         (pid, chat_id))
+        self._json({"ok": True, "persona_id": pid})
 
     def _chat_delete(self, chat_id: int) -> None:
         """DELETE /api/chats/{id} — the ONLY thing that destroys a chat.
@@ -2003,7 +2051,8 @@ class Handler(BaseHTTPRequestHandler):
                 mems = [f"({m['kind']}) {m['content']}" for m in
                         memory.for_turn(conn, chat_id, mem_char,
                                         recent_text=recent,
-                                        limits=memory.settings(load_config()))]
+                                        limits=memory.settings(load_config()),
+                                        persona_id=chat_row["persona_id"])]
 
             block_list = blocks.merge((preset.get("data") or {}).get("blocks"))
             # The history budget is computed against this. It was never passed
@@ -2433,8 +2482,6 @@ class Handler(BaseHTTPRequestHandler):
         def work():
             try:
                 with get_db() as conn:
-                    existing = [m["content"] for m in
-                                memory.for_turn(conn, chat_id, character_id)]
                     # The persona is ALREADY KNOWN — it is injected into every
                     # prompt, so the model "discovering" the user's name in a
                     # reply is it reading its own system prompt back. Handed
@@ -2442,14 +2489,19 @@ class Handler(BaseHTTPRequestHandler):
                     # recorded as a memory; memory.sanitize_facts below is the
                     # belt for an extractor that records it anyway.
                     prow = conn.execute(
-                        "SELECT p.name, p.data FROM personas p"
-                        " JOIN chats c ON c.persona_id = p.id"
+                        "SELECT c.persona_id AS pid, p.name, p.data"
+                        " FROM chats c LEFT JOIN personas p"
+                        " ON p.id = c.persona_id"
                         " WHERE c.id=?", (chat_id,)).fetchone()
+                    persona_id = prow["pid"] if prow else None
+                    existing = [m["content"] for m in
+                                memory.for_turn(conn, chat_id, character_id,
+                                                persona_id=persona_id)]
                     crow = conn.execute(
                         "SELECT name FROM characters WHERE id=?",
                         (character_id,)).fetchone()
                 persona_name, persona_desc = "", ""
-                if prow:
+                if prow and prow["name"]:
                     persona_name = prow["name"] or ""
                     try:
                         persona_desc = (json.loads(prow["data"] or "{}")
@@ -2458,6 +2510,11 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                 char_name = (crow["name"] if crow else "") or ""
                 known = memory.persona_known(persona_name, persona_desc)
+                # With no persona picked, {{user}} still expands to "anon"
+                # (the macros fallback) in every prompt — so "the user is
+                # called anon" is the model reading its own prompt back, and
+                # the naming guard must know the name it was actually shown.
+                guard_name = persona_name or "anon"
 
                 def llm_once(msgs):
                     payload = llm.build_payload(
@@ -2469,23 +2526,28 @@ class Handler(BaseHTTPRequestHandler):
                     system=prompts.get("memory_extract"))
                 cfg = memory.settings(load_config())
                 facts = memory.sanitize_facts(
-                    facts, persona_name, persona_desc, char_name,
+                    facts, guard_name, persona_desc, char_name,
                     cfg["dupe_threshold"])
                 if facts:
                     with get_db() as conn:
                         memory.store_memories(conn, chat_id, character_id,
-                                              facts, cfg["dupe_threshold"])
+                                              facts, cfg["dupe_threshold"],
+                                              persona_id=persona_id)
 
                 # Once a scope gets fat, merge it rather than letting it grow.
                 # Compression, not forgetting — consolidate() refuses a result
-                # that grew or that threw most of the detail away.
+                # that grew or that threw most of the detail away. Bucketed by
+                # persona: consolidating THIS persona's rows must neither read
+                # nor delete another persona's.
                 with get_db() as conn:
                     for scope in ("character", "user"):
                         rows = [dict(r) for r in conn.execute(
                             "SELECT * FROM memories WHERE kind=?"
+                            " AND persona_id IS ?"
                             + (" AND character_id=?" if scope == "character" else ""),
-                            (scope, character_id) if scope == "character"
-                            else (scope,)).fetchall()]
+                            (scope, persona_id, character_id)
+                            if scope == "character"
+                            else (scope, persona_id)).fetchall()]
                         if len(rows) < cfg["consolidate_at"]:
                             continue
                         merged = memory.consolidate(
@@ -2493,7 +2555,8 @@ class Handler(BaseHTTPRequestHandler):
                             system=prompts.get("memory_consolidate"))
                         if merged:
                             memory.replace_scope(conn, scope, merged,
-                                                 chat_id, character_id)
+                                                 chat_id, character_id,
+                                                 persona_id=persona_id)
             except Exception:  # noqa: BLE001 — memory must never break chat
                 pass
         threading.Thread(target=work, daemon=True).start()
@@ -2525,7 +2588,9 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("use_memory", True):
             with get_db() as conn:
                 mems = [f"({m['kind']}) {m['content']}"
-                        for m in memory.for_scenario(conn, char["id"])]
+                        for m in memory.for_scenario(
+                            conn, char["id"],
+                            persona_id=persona["id"] if persona else None)]
         return char, persona, mems, None
 
     def _scenarios_suggest(self) -> None:
@@ -2918,12 +2983,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _memories_list(self, chat_id: int) -> None:
         with get_db() as conn:
-            row = conn.execute("SELECT character_id FROM chats WHERE id=?",
-                               (chat_id,)).fetchone()
+            row = conn.execute(
+                "SELECT character_id, persona_id FROM chats WHERE id=?",
+                (chat_id,)).fetchone()
             if not row:
                 self._json({"error": "chat not found"}, 404)
                 return
-            mems = memory.for_turn(conn, chat_id, row["character_id"])
+            mems = memory.for_turn(conn, chat_id, row["character_id"],
+                                   persona_id=row["persona_id"])
             # The whole scene's memory, not just the lead's. Each guest keeps
             # her own relationship record now, and what the panel cannot show
             # the user cannot see or edit.
@@ -2934,7 +3001,9 @@ class Handler(BaseHTTPRequestHandler):
                 marks = ",".join("?" * len(guests))
                 mems += [dict(r) for r in conn.execute(
                     f"SELECT * FROM memories WHERE kind='character'"
-                    f" AND character_id IN ({marks}) ORDER BY id", guests)]
+                    f" AND character_id IN ({marks})"
+                    f" AND (persona_id IS NULL OR persona_id IS ?)"
+                    f" ORDER BY id", (*guests, row["persona_id"]))]
         grouped = {"user": [], "character": [], "chat": []}
         for m in mems:
             grouped.setdefault(m["kind"], []).append(
@@ -2981,8 +3050,18 @@ class Handler(BaseHTTPRequestHandler):
                 row = conn.execute("SELECT character_id FROM chats WHERE id=?",
                                    (chat_id,)).fetchone()
                 character_id = row["character_id"] if row else None
+            # A manual write from inside a chat lands in that chat's persona
+            # bucket — the panel is showing that bucket, so the row must land
+            # where the user can see it.
+            persona_id = None
+            if chat_id:
+                prow = conn.execute(
+                    "SELECT persona_id FROM chats WHERE id=?",
+                    (chat_id,)).fetchone()
+                persona_id = prow["persona_id"] if prow else None
             mem_id = memory.upsert(conn, body.get("id"), scope, content,
-                                   chat_id, character_id)
+                                   chat_id, character_id,
+                                   persona_id=persona_id)
         self._json({"ok": True, "id": mem_id, "scope": scope})
 
 
@@ -3049,7 +3128,8 @@ class Handler(BaseHTTPRequestHandler):
             msgs = engine.get_messages(conn, chat_id)
             mems = [f"({m['kind']}) {m['content']}" for m in
                     memory.for_turn(conn, chat_id, chat["character_id"],
-                                    limits=memory.settings(load_config()))]
+                                    limits=memory.settings(load_config()),
+                                    persona_id=chat["persona_id"])]
         char = rows_get("characters", chat["character_id"]) or {}
         persona = (rows_get("personas", chat["persona_id"])
                    if chat["persona_id"] else None)
@@ -3096,6 +3176,13 @@ class Handler(BaseHTTPRequestHandler):
             if last_at else "You have never texted them before.",
             f"IT IS CURRENTLY: {part}",
         ]
+        if msgs:
+            # Who is leaving whom on read is the single strongest signal for
+            # how a real person paces a thread, so it is stated outright
+            # rather than left to be inferred from the tail.
+            ask.append("THE LAST MESSAGE WAS FROM: "
+                       + ("you — it has not been answered"
+                          if msgs[-1]["role"] == "assistant" else "them"))
         if mems:
             ask.append("YOU REMEMBER:\n" + "\n".join(f"- {m}" for m in mems[:10]))
         if tail:
@@ -3119,21 +3206,52 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         text = (raw or "").strip()
+        # Her own pacing, stated in character. The NEXT line is stripped
+        # before anything is stored — it is scheduling, not dialogue — and
+        # it is honoured whether she texted or declined: "not now, maybe
+        # this evening" is a real answer with a real clock on it. Clamped
+        # to [10 min, 48 h] because a model that answers "2" or "99999" is
+        # not expressing personality, it is misreading the form.
+        next_min = None
+        m = re.search(r"(?mi)^\s*NEXT:\s*(\d+(?:\.\d+)?)\s*$", text)
+        if m:
+            try:
+                next_min = max(10.0, min(2880.0, float(m.group(1))))
+            except ValueError:
+                pass
+            text = (text[:m.start()] + text[m.end():]).strip()
+        if next_min:
+            with get_db() as conn:
+                row = conn.execute("SELECT data FROM chats WHERE id=?",
+                                   (chat_id,)).fetchone()
+                try:
+                    data = json.loads((row["data"] if row else "") or "{}")
+                except json.JSONDecodeError:
+                    data = {}
+                t = dict(data.get("texting") or {})
+                t["next_at"] = time.time() + next_min * 60
+                data["texting"] = t
+                conn.execute("UPDATE chats SET data=? WHERE id=?",
+                             (json.dumps(data), chat_id))
         if text.upper().startswith("NOTHING") or len(text) < 2:
             self._json({"ok": True, "sent": False,
-                        "why": "she had nothing to say"})
+                        "why": "she had nothing to say",
+                        "next_minutes": next_min})
             return
         text = tools.split_tool_call(text)[0]
         text = tools.split_director_note(text)[0].strip()
         if not text:
-            self._json({"ok": True, "sent": False, "why": "empty after parsing"})
+            self._json({"ok": True, "sent": False,
+                        "why": "empty after parsing",
+                        "next_minutes": next_min})
             return
 
         with get_db() as conn:
             mid = engine.add_message(conn, chat_id, "assistant", text,
                                      {"unprompted": True})
         self._json({"ok": True, "sent": True, "message_id": mid,
-                    "text": text, "gap_minutes": gap_min})
+                    "text": text, "gap_minutes": gap_min,
+                    "next_minutes": next_min})
 
     def _chat_remember(self) -> None:
         """POST /api/chats/{id}/remember — capture this chat on purpose.
@@ -3153,7 +3271,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             msgs = engine.get_messages(conn, chat_id)
             existing = [m["content"] for m in
-                        memory.for_turn(conn, chat_id, chat["character_id"])]
+                        memory.for_turn(conn, chat_id, chat["character_id"],
+                                        persona_id=chat["persona_id"])]
         if not msgs:
             self._json({"error": "nothing has happened yet"}, 400)
             return
@@ -3215,8 +3334,10 @@ class Handler(BaseHTTPRequestHandler):
             f"(the whole scene between {char.get('name', 'her')} and the user)",
             system=prompts.get("memory_remember"))
         cfg = memory.settings(load_config())
+        # Same fallback as the automatic pass: with no persona, the prompt
+        # still says "anon", so that is the name the guard must catch.
         facts = memory.sanitize_facts(
-            facts, persona.get("name", ""),
+            facts, persona.get("name", "") or "anon",
             persona.get("data", {}).get("description", ""),
             char.get("name", ""), cfg["dupe_threshold"])
         found = len(facts)
@@ -3227,11 +3348,13 @@ class Handler(BaseHTTPRequestHandler):
                 # names, and only the unattributable remainder to the lead.
                 buckets, facts = memory.attribute_facts(facts, members)
                 for cid, fs in buckets.items():
-                    added += memory.store_memories(conn, chat_id, cid, fs,
-                                                   cfg["dupe_threshold"])
+                    added += memory.store_memories(
+                        conn, chat_id, cid, fs, cfg["dupe_threshold"],
+                        persona_id=chat["persona_id"])
             added += memory.store_memories(conn, chat_id,
                                            chat["character_id"],
-                                           facts, cfg["dupe_threshold"])
+                                           facts, cfg["dupe_threshold"],
+                                           persona_id=chat["persona_id"])
         self._json({"ok": True, "added": added, "found": found,
                     "duplicates": found - added})
 
@@ -3244,6 +3367,11 @@ class Handler(BaseHTTPRequestHandler):
         cfg = memory.settings(load_config())
         with get_db() as conn:
             before = conn.execute("SELECT count(*) FROM memories").fetchone()[0]
+            # Test residue first: the old suite POSTed its fixture memories
+            # through the live API, and a user-scope fixture row was
+            # structurally unsweepable (character_id NULL). Purged by exact
+            # content, plus orphan chat-scope rows nothing can ever read.
+            purged = memory.purge_fixture_residue(conn)
             result = memory.dedupe_existing(conn, cfg["dupe_threshold"])
             # Repair scope leaks written before sanitize_facts existed: a
             # user-scope fact that is visibly about exactly one character
@@ -3253,7 +3381,7 @@ class Handler(BaseHTTPRequestHandler):
             rescoped = memory.rescope_user_facts(conn, chars)
             after = conn.execute("SELECT count(*) FROM memories").fetchone()[0]
         self._json({"ok": True, "before": before, "after": after,
-                    "rescoped": rescoped, **result})
+                    "rescoped": rescoped, "purged": purged, **result})
 
     def _memory_delete(self, mem_id: int) -> None:
         with get_db() as conn:
@@ -4287,9 +4415,25 @@ class Handler(BaseHTTPRequestHandler):
         found = self._studio_context(body)
         ctx, char, persona = found["ctx"], found["character"], found["persona"]
 
+        # A hand-picked "use THIS picture of her" reference must actually be
+        # one of HER pictures. Checked here rather than in plan() because the
+        # gallery is a server concept — and a filename from someone else's
+        # gallery (or from nowhere) riding into a render is exactly the kind
+        # of thing that must fail loudly at draft time, not 400 from ComfyUI
+        # a minute into an upload.
+        opts = body.get("opts") or {}
+        if opts.get("her_ref"):
+            with get_db() as conn:
+                owned = conn.execute(
+                    "SELECT 1 FROM assets WHERE path=? AND character_id=?",
+                    (opts["her_ref"], (char or {}).get("id"))).fetchone()
+            if not owned:
+                self._json({"error": "that picture is not in her gallery"},
+                           400)
+                return
+
         try:
-            job = studio.plan(rid, body.get("opts") or {}, ctx, cfg,
-                              char, persona)
+            job = studio.plan(rid, opts, ctx, cfg, char, persona)
         except studio.StudioError as exc:
             self._json({"error": str(exc)}, 400)
             return
@@ -4351,7 +4495,12 @@ class Handler(BaseHTTPRequestHandler):
                     "values": values, "brief": brief,
                     "review": studio.review(job, values, self._installed_loras(cfg)),
                     "vram_gb": job["vram_gb"],
-                    "refs": [r["label"] for r in job["refs"]]})
+                    # label AND file: the approval card shows the actual
+                    # pictures riding along, so "which photo is Picture 2"
+                    # is visible before a minute of video is spent on it.
+                    "refs": [{"label": r["label"], "file": r["file"],
+                              "source": r.get("source", "")}
+                             for r in job["refs"]]})
 
     def _speak_lines(self, body: dict, ctx: dict) -> str:
         """The words to read out, in order of specificity.
@@ -4420,10 +4569,21 @@ class Handler(BaseHTTPRequestHandler):
             "label": wfpack.BUNDLED[job["workflow"]]["label"],
             "values": values, "review": studio.review(job, values, self._installed_loras(cfg)),
             "vram_gb": job["vram_gb"],
-            "refs": [r["label"] for r in job["refs"]]}})
+            "refs": [{"label": r["label"], "file": r["file"],
+                      "source": r.get("source", "")} for r in job["refs"]]}})
 
     def _studio_approve(self) -> None:
-        """POST /api/studio/approve {id, values?} — run the approved job."""
+        """POST /api/studio/approve {id, values?} — run the approved job.
+
+        Streams SSE now: {note} frames as the run narrates itself, {progress}
+        frames while ComfyUI works, one final {ok, assets, ...} (or {error})
+        frame, then [DONE]. It used to be a single blocking POST whose status
+        text was written client-side BEFORE the await and never updated — a
+        seven-minute H3 render sat behind "rendering on your box…" with no
+        sign of life, which is indistinguishable from a hang. The vram
+        brokering notes were buffered the same way and arrived after the job,
+        which is the one time they are useless.
+        """
         body = self._body()
         pending = tools.pending_pop(int(body.get("id", 0)))
         if not pending:
@@ -4434,10 +4594,36 @@ class Handler(BaseHTTPRequestHandler):
             values = json.loads(pending["prompt"])
         except json.JSONDecodeError:
             values = {}
-        values.update(body.get("values") or {})   # the user's edits win
+        # The user's edits win — but they arrive as STRINGS (the approval
+        # card is textareas), and set_slots writes them into the graph
+        # verbatim, so "10" landing on a float node rejects the graph.
+        # Coerce each edit back to the drafted value's own type.
+        for k, v in (body.get("values") or {}).items():
+            cur = values.get(k)
+            if isinstance(cur, bool):
+                v = v in (True, "true", "on", "1", 1)
+            elif isinstance(cur, (int, float)) and isinstance(v, str):
+                try:
+                    v = int(float(v)) if isinstance(cur, int) else float(v)
+                except ValueError:
+                    pass
+            values[k] = v
 
         cfg = load_config()
-        notes = []
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        def send(obj) -> bool:
+            try:
+                self.wfile.write(f"data: {json.dumps(obj)}\n\n".encode())
+                self.wfile.flush()
+                return True
+            except (BrokenPipeError, ConnectionResetError):
+                return False
 
         def read_asset(name: str):
             path = ASSETS / name
@@ -4445,20 +4631,22 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             result = studio.run(job, values, cfg, asset_path=read_asset,
-                                note=notes.append)
+                                note=lambda m: send({"note": m}),
+                                progress=lambda p: send({"progress": p}))
+            saved = self._save_assets(result["files"], job, values,
+                                      result.get("meta"))
+            send({"ok": True, "assets": saved,
+                  "workflow": result["workflow"],
+                  "vram": result["vram"].get("steps", [])})
         except (studio.StudioError, comfy.ComfyError) as exc:
-            self._json({"error": str(exc), "notes": notes}, 502)
-            return
+            send({"error": str(exc)})
         except Exception as exc:  # noqa: BLE001
-            self._json({"error": f"{type(exc).__name__}: {exc}",
-                        "notes": notes}, 502)
-            return
-
-        saved = self._save_assets(result["files"], job, values,
-                                  result.get("meta"))
-        self._json({"ok": True, "assets": saved, "notes": notes,
-                    "workflow": result["workflow"],
-                    "vram": result["vram"].get("steps", [])})
+            send({"error": f"{type(exc).__name__}: {exc}"})
+        try:
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _studio_remake(self) -> None:
         """POST /api/studio/remake {asset_id, prompt?, seed?}
@@ -4599,6 +4787,149 @@ class Handler(BaseHTTPRequestHandler):
                 saved.append({"id": cur.lastrowid, "kind": f["kind"],
                               "url": f"/api/avatars/{fname}"})
         return saved
+
+    # -- datapack: one-shot LAN clone between two installs ----------------
+    #
+    # A CLONE, not a merge. Every table cross-references AUTOINCREMENT ids —
+    # including inside JSON blobs (message speaker stamps, lorebook
+    # from_card_id) — so a merging import would have to remap ids through
+    # free-form JSON, and one missed reference silently mis-attributes
+    # messages: the exact bug class the tombstone machinery exists to
+    # prevent. Wholesale replacement is honest; per-object merge can ride
+    # the card-export format later.
+
+    def _datapack_get(self, query: dict) -> None:
+        """GET /api/datapack[?keys=1] — the whole install as one zip.
+
+        The db snapshot goes through sqlite's backup API (WAL-safe; a plain
+        file copy of a live WAL db can be torn). API keys for remote
+        backends are STRIPPED unless ?keys=1 — same-owner LAN clones
+        usually want them, but they travel only when asked for.
+        """
+        import shutil as _sh
+        import tempfile
+        import zipfile
+        include_keys = (query.get("keys") or [""])[0] == "1"
+        tmpdir = tempfile.mkdtemp(prefix="ck-pack-")
+        try:
+            snap = os.path.join(tmpdir, "coomkit.sqlite")
+            db_file = DATA / "coomkit.sqlite"
+            if db_file.exists():
+                src = sqlite3.connect(str(db_file))
+                dst = sqlite3.connect(snap)
+                with dst:
+                    src.backup(dst)
+                src.close()
+                dst.close()
+            zpath = os.path.join(tmpdir, "pack.zip")
+            with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+                if os.path.exists(snap):
+                    z.write(snap, "coomkit.sqlite")
+                cfg = json.loads(json.dumps(load_config()))
+                if not include_keys:
+                    for rb in cfg.get("remote_backends") or []:
+                        rb.pop("key", None)
+                # vram-parked.json is deliberately absent: it is a debt to a
+                # GPU the other machine does not have.
+                z.writestr("config.json", json.dumps(cfg, indent=2))
+                prompts_file = DATA / "prompts.json"
+                if prompts_file.exists():
+                    z.write(prompts_file, "prompts.json")
+                if ASSETS.exists():
+                    for f in sorted(ASSETS.iterdir()):
+                        if f.is_file():
+                            z.write(f, "assets/" + f.name)
+            size = os.path.getsize(zpath)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition",
+                             'attachment; filename="coomkit-datapack.zip"')
+            self.end_headers()
+            # _static_file reads whole files into memory; a datapack is
+            # mostly renders and can be GBs, so this one streams.
+            with open(zpath, "rb") as fh:
+                while True:
+                    chunk = fh.read(1 << 20)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            _sh.rmtree(tmpdir, ignore_errors=True)
+
+    def _datapack_pull(self) -> None:
+        """POST /api/datapack/pull {url, keys?, keep_config?} — become the
+        other install.
+
+        Replaces data/ wholesale (the old one survives as data.bak/).
+        `keep_config` defaults ON: the puller's own config points at ITS
+        backends and ComfyUI — a phone cloning a desktop wants the
+        desktop's characters and chats, not a config full of the desktop's
+        127.0.0.1 addresses that resolve to the phone itself.
+        """
+        import shutil as _sh
+        import tempfile
+        import zipfile
+        body = self._body()
+        url = (body.get("url") or "").strip().rstrip("/")
+        if not url:
+            self._json({"error": "url required — the other CoomKit's "
+                                 "address, e.g. http://192.168.1.20:3939"}, 400)
+            return
+        if "://" not in url:
+            url = "http://" + url
+        fetch = url + "/api/datapack" + ("?keys=1" if body.get("keys") else "")
+        tmpdir = tempfile.mkdtemp(prefix="ck-pull-")
+        try:
+            zpath = os.path.join(tmpdir, "pack.zip")
+            try:
+                with urllib.request.urlopen(fetch, timeout=1800) as r, \
+                        open(zpath, "wb") as out:
+                    _sh.copyfileobj(r, out, 1 << 20)
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": f"could not fetch the pack: {exc}"}, 502)
+                return
+            newdir = os.path.join(tmpdir, "data")
+            os.makedirs(os.path.join(newdir, "assets"), exist_ok=True)
+            try:
+                with zipfile.ZipFile(zpath) as z:
+                    names = z.namelist()
+                    if "coomkit.sqlite" not in names:
+                        self._json({"error": "that is not a CoomKit "
+                                             "datapack"}, 400)
+                        return
+                    for n in names:
+                        # zip-slip guard: nothing may escape the target dir
+                        if n.startswith("/") or ".." in n:
+                            self._json({"error": f"unsafe path in pack: "
+                                                 f"{n}"}, 400)
+                            return
+                    z.extractall(newdir)
+            except zipfile.BadZipFile:
+                self._json({"error": "that is not a zip at all"}, 400)
+                return
+            keep_config = body.get("keep_config", True)
+            own_config = (DATA / "config.json").read_text() \
+                if keep_config and (DATA / "config.json").exists() else None
+            bak = ROOT / "data.bak"
+            if bak.exists():
+                _sh.rmtree(bak)
+            if DATA.exists():
+                DATA.rename(bak)
+            _sh.move(newdir, str(DATA))
+            if own_config is not None:
+                (DATA / "config.json").write_text(own_config)
+            counts = {}
+            with get_db() as conn:   # also re-stamps the schema version
+                for t in ("characters", "chats", "messages", "assets"):
+                    counts[t] = conn.execute(
+                        f"SELECT count(*) FROM {t}").fetchone()[0]
+            self._json({"ok": True, "backup": "data.bak/", **counts,
+                        "kept_local_config": bool(own_config is not None)})
+        finally:
+            _sh.rmtree(tmpdir, ignore_errors=True)
 
     def _gallery(self, character_id: int) -> None:
         """GET /api/gallery/<character_id> — everything ever made of her.
@@ -5125,6 +5456,124 @@ def _recover_parked_models(cfg: dict) -> None:
     threading.Thread(target=run, daemon=True).start()
 
 
+def _texting_daemon(port: int) -> None:
+    """She texts on her own clock now, not the browser's.
+
+    The browser scheduler only ever ran while a tab was open, which on
+    Android means never — the browser is suspended the moment the screen
+    blanks, while the Termux server underneath holds itself open. So the
+    schedule moved server-side: this thread wakes every couple of minutes,
+    finds texting-enabled sms threads whose gap has elapsed, and POSTs the
+    ordinary /api/chats/text-first route at itself — one path, exactly the
+    call the browser made, so the model still gets its reason and "nothing
+    to say" stays a supported outcome.
+
+    Gated on config `texting.server` with a STORED backend and model,
+    because a daemon has no browser session to borrow a pick from — that is
+    the decision CLAUDE.md said to make deliberately, made: enabling the
+    feature captures the picks then in hand, and /api/config carries no key
+    material (the route attaches keys server-side as always). Bookkeeping
+    (last_attempt, daily count) lives on the chat's own texting block, the
+    same place the gap and cap already were. A thread with ZERO messages is
+    never texted: who opens is the user's call, same guard the browser
+    version had. The browser scheduler stands down entirely while this is
+    on, so the two clocks cannot double-text.
+    """
+    while True:
+        time.sleep(120)
+        try:
+            cfg = load_config()
+            tx = cfg.get("texting") or {}
+            if not (tx.get("server") and tx.get("backend") and tx.get("model")):
+                continue
+            with get_db() as conn:
+                rows = [(r["id"], r["data"]) for r in conn.execute(
+                    "SELECT id, data FROM chats WHERE mode='sms'").fetchall()]
+            now = time.time()
+            today = time.strftime("%Y-%m-%d")
+            for chat_id, raw in rows:
+                try:
+                    data = json.loads(raw or "{}")
+                except json.JSONDecodeError:
+                    continue
+                t = dict(data.get("texting") or {})
+                if not t.get("enabled"):
+                    continue
+                if t.get("sent_day") == today \
+                        and (t.get("sent_today") or 0) >= (t.get("daily_cap") or 6):
+                    continue
+                with get_db() as conn:
+                    last = conn.execute(
+                        "SELECT MAX(created), COUNT(*) FROM messages"
+                        " WHERE chat_id=?", (chat_id,)).fetchone()
+                if not last[1]:
+                    continue
+                # HER clock first: the text-first call ends with a NEXT line
+                # — the character's own guess at when she would reach for the
+                # phone again — and the route stores it as next_at. That is
+                # what makes the pacing feel like a person instead of a cron
+                # job: the needy double-text within the hour, the proud sulk
+                # for a day, and nobody texts a silence at the same tempo
+                # twice. The daily cap stays the spend guard either way.
+                due = t.get("next_at")
+                if due:
+                    if now < due:
+                        continue
+                else:
+                    # No stated pace yet (first run, or a model that ignored
+                    # the form): the configured gap, JITTERED — a fixed
+                    # interval reads as a machine the third time it fires.
+                    since = now - max(last[0] or 0,
+                                      t.get("last_attempt") or 0)
+                    gap = (t.get("gap_minutes") or 45) * 60
+                    if since < gap * random.uniform(0.8, 2.2):
+                        continue
+                body = json.dumps({
+                    "chat_id": chat_id, "backend": tx["backend"],
+                    "model": tx["model"],
+                    "preset_id": tx.get("preset_id")}).encode()
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/chats/text-first",
+                    data=body, headers={"Content-Type": "application/json"},
+                    method="POST")
+                sent = False
+                try:
+                    with urllib.request.urlopen(req, timeout=300) as resp:
+                        sent = bool(json.loads(resp.read().decode())
+                                    .get("sent"))
+                except Exception:  # noqa: BLE001 — backend down; next tick
+                    continue
+                # The clock moves even when she had nothing to say — that is
+                # a real answer, and without this she is asked again in two
+                # minutes forever.
+                with get_db() as conn:
+                    row = conn.execute("SELECT data FROM chats WHERE id=?",
+                                       (chat_id,)).fetchone()
+                    if not row:
+                        continue
+                    try:
+                        data = json.loads(row["data"] or "{}")
+                    except json.JSONDecodeError:
+                        data = {}
+                    t = dict(data.get("texting") or {})
+                    t["last_attempt"] = now
+                    # The route refreshes next_at from the model's NEXT line
+                    # during the call. If it is still in the past the model
+                    # skipped the form — drop it, or this loop fires again
+                    # every two minutes until the daily cap eats itself.
+                    if (t.get("next_at") or 0) <= now:
+                        t.pop("next_at", None)
+                    if sent:
+                        if t.get("sent_day") != today:
+                            t["sent_day"], t["sent_today"] = today, 0
+                        t["sent_today"] = (t.get("sent_today") or 0) + 1
+                    data["texting"] = t
+                    conn.execute("UPDATE chats SET data=? WHERE id=?",
+                                 (json.dumps(data), chat_id))
+        except Exception:  # noqa: BLE001 — the daemon must never die
+            pass
+
+
 def main() -> int:
     init_db()
     seeded = seed_first_run()
@@ -5138,11 +5587,19 @@ def main() -> int:
         print(f"→ gave {moved} preset(s) a prompt-block order")
     cfg = load_config()
     port = int(cfg.get("port", 3939))
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    # 127.0.0.1 unless the user says otherwise. "host": "0.0.0.0" is how a
+    # phone on the same LAN reaches a desktop CoomKit (and how the datapack
+    # pull reaches a peer) — but exposing an unauthenticated NSFW harness to
+    # a network is a decision, not a default, so it stays opt-in config.
+    host = str(cfg.get("host") or "127.0.0.1")
+    server = ThreadingHTTPServer((host, port), Handler)
     (ROOT / ".coomkit.pid").write_text(str(__import__("os").getpid()))
     _recover_parked_models(cfg)
+    threading.Thread(target=_texting_daemon, args=(port,),
+                     daemon=True).start()
     print(f"CoomKit {VERSION} — f-fine, I'll manage your smut...")
-    print(f"→ http://127.0.0.1:{port}")
+    print(f"→ http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
+          + (" (listening on every interface)" if host == "0.0.0.0" else ""))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
