@@ -1007,6 +1007,20 @@ class Handler(BaseHTTPRequestHandler):
             self._json(cfg)
         elif url.path == "/api/datapack":
             self._datapack_get(urllib.parse.parse_qs(url.query))
+        elif url.path == "/api/tools/pending":
+            # Undelivered approval cards — how a picture she attached to a
+            # daemon-sent text reaches the user when they next open the
+            # phone. In-memory like the rest of the registry: a restart
+            # drops them, and she simply offers again next time.
+            q = urllib.parse.parse_qs(url.query)
+            want = int((q.get("chat_id") or ["0"])[0] or 0)
+            out = []
+            for e in tools.pending_all():
+                pl = (e.get("call") or {}).get("payload")
+                job = (e.get("call") or {}).get("studio") or {}
+                if pl and (not want or job.get("chat_id") == want):
+                    out.append(pl)
+            self._json({"pending": out})
         elif url.path == "/api/chats":
             self._chats_list(urllib.parse.parse_qs(url.query))
         elif url.path == "/api/characters":
@@ -3169,6 +3183,13 @@ class Handler(BaseHTTPRequestHandler):
             mx(engine.card_text(cfields)),
             mx(engine.persona_text(persona)),
             prompts.get("sms", char=char_name) if chat["mode"] == "sms" else "",
+            # She can attach a picture to an unprompted text — "look what
+            # i'm wearing" with the selfie actually riding along. The spec
+            # was simply absent from this prompt before, so she could not
+            # have known the format existed on this path.
+            (prompts.get("tools_spec")
+             if body.get("tools", True) and load_config().get("comfyui_url")
+             else ""),
             prompts.get("text_first", char=char_name, user=user_name),
         ) if x and x.strip())
         ask = [
@@ -3238,7 +3259,7 @@ class Handler(BaseHTTPRequestHandler):
                         "why": "she had nothing to say",
                         "next_minutes": next_min})
             return
-        text = tools.split_tool_call(text)[0]
+        text, tool_call = tools.split_tool_call(text)
         text = tools.split_director_note(text)[0].strip()
         if not text:
             self._json({"ok": True, "sent": False,
@@ -3249,9 +3270,28 @@ class Handler(BaseHTTPRequestHandler):
         with get_db() as conn:
             mid = engine.add_message(conn, chat_id, "assistant", text,
                                      {"unprompted": True})
+        # An attached shot rides as a pending approval, never an auto-render:
+        # the approval rule holds even when she texts first. The card waits
+        # in the registry until a phone opens (loadPhone lists it), so a
+        # daemon text sent to a sleeping phone still delivers its "wait till
+        # you see" moment hours later. Recipe calls only on this path — the
+        # spec steers her there, and a free-form action call with no one
+        # watching has nowhere honest to land.
+        pending_payload = None
+        if tool_call and isinstance(tool_call, dict) \
+                and tool_call.get("recipe") in recipes.RECIPES:
+            try:
+                collected = {}
+                self._studio_pending_from_tool(
+                    tool_call, chat_id, mid, chat, body,
+                    lambda fr: collected.update(fr))
+                pending_payload = collected.get("studio_pending")
+            except Exception:  # noqa: BLE001 — a failed draft must not kill the text
+                pass
         self._json({"ok": True, "sent": True, "message_id": mid,
                     "text": text, "gap_minutes": gap_min,
-                    "next_minutes": next_min})
+                    "next_minutes": next_min,
+                    "studio_pending": pending_payload})
 
     def _chat_remember(self) -> None:
         """POST /api/chats/{id}/remember — capture this chat on purpose.
@@ -4561,16 +4601,23 @@ class Handler(BaseHTTPRequestHandler):
         values = studio.ensure_artists(
             job, studio.apply_pins(job, studio.parse_writer(job, raw)))
 
-        pid = tools.register({"studio": job, "brief": brief},
-                             json.dumps(values))
-        send({"studio_pending": {
-            "id": pid, "recipe": req["recipe"], "kind": job["kind"],
+        payload = {
+            "recipe": req["recipe"], "kind": job["kind"],
             "workflow": job["workflow"],
             "label": wfpack.BUNDLED[job["workflow"]]["label"],
-            "values": values, "review": studio.review(job, values, self._installed_loras(cfg)),
+            "values": values,
+            "review": studio.review(job, values, self._installed_loras(cfg)),
             "vram_gb": job["vram_gb"],
             "refs": [{"label": r["label"], "file": r["file"],
-                      "source": r.get("source", "")} for r in job["refs"]]}})
+                      "source": r.get("source", "")} for r in job["refs"]]}
+        # The payload rides in the registry beside the job so a pending card
+        # can be re-shown later — a daemon-sent text has nobody watching the
+        # stream, and without this her "wait till you see" attachment
+        # evaporated if no tab was open the moment it was drafted.
+        pid = tools.register({"studio": job, "brief": brief,
+                              "payload": payload}, json.dumps(values))
+        payload["id"] = pid
+        send({"studio_pending": payload})
 
     def _studio_approve(self) -> None:
         """POST /api/studio/approve {id, values?} — run the approved job.
@@ -5197,7 +5244,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(vram.restore_all(load_config()))
 
     # -- tool approval flow --------------------------------------------------
-    def _tool_via_studio(self, pending: dict, call: dict, kind: str) -> None:
+    def _tool_via_studio(self, pending: dict, call: dict, kind: str,
+                         send) -> None:
         """Run an approved ```tool``` call on the shipped workflows.
 
         The bring-your-own table is the escape hatch, not the floor. A graph
@@ -5257,21 +5305,26 @@ class Handler(BaseHTTPRequestHandler):
             return path.read_bytes() if path.exists() else None
 
         try:
-            out = studio.run(job, values, cfg, asset_path=read_asset)
+            out = studio.run(job, values, cfg, asset_path=read_asset,
+                             note=lambda m: send({"note": m}),
+                             progress=lambda pr: send({"progress": pr}))
+            saved = self._save_assets(out["files"], job, values,
+                                      out.get("meta"))
+            send({"ok": True, "assets": saved, "prompt": pending["prompt"],
+                  "workflow": spec.get("label", wf_name)})
         except (studio.StudioError, comfy.ComfyError) as exc:
-            self._json({"error": str(exc)}, 502)
-            return
+            send({"error": str(exc)})
         except Exception as exc:  # noqa: BLE001
-            self._json({"error": f"{type(exc).__name__}: {exc}"}, 502)
-            return
-        saved = self._save_assets(out["files"], job, values, out.get("meta"))
-        self._json({"ok": True, "assets": saved, "prompt": pending["prompt"],
-                    "workflow": spec.get("label", wf_name)})
+            send({"error": f"{type(exc).__name__}: {exc}"})
 
     def _tool_approve(self) -> None:
         """POST /api/tools/approve {id, prompt?} — run a pending tool call.
 
         The user may have edited the prompt; the edited version wins.
+        Streams the same SSE contract as the studio routes — {note} and
+        {progress} frames, one result frame, [DONE] — because her own tool
+        calls render on the same GPU at the same speeds, and a video she
+        asked for deserves the same live clock as one the user drafted.
         """
         body = self._body()
         pid = int(body.get("id", 0))
@@ -5294,6 +5347,27 @@ class Handler(BaseHTTPRequestHandler):
                 break
         if wf is None and rows:
             wf = rows[0]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        def send(obj) -> bool:
+            try:
+                self.wfile.write(f"data: {json.dumps(obj)}\n\n".encode())
+                self.wfile.flush()
+                return True
+            except (BrokenPipeError, ConnectionResetError):
+                return False
+
+        def done():
+            try:
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
         if wf is None:
             # Nothing stored is the NORMAL case, not an error: the shipped
             # graphs live in wfpack, not in this table, and nothing ever
@@ -5303,7 +5377,8 @@ class Handler(BaseHTTPRequestHandler):
             # in the repo. Hand it to the studio path instead, which is the
             # one generation path and brings VRAM brokering, stage splicing
             # and LoRA injection with it.
-            self._tool_via_studio(p, call, kind)
+            self._tool_via_studio(p, call, kind, send)
+            done()
             return
 
         values = {"prompt": p["prompt"]}
@@ -5319,9 +5394,12 @@ class Handler(BaseHTTPRequestHandler):
         url = load_config().get("comfyui_url", "")
         try:
             files = comfy.run_workflow(url, wf["data"]["workflow"], values,
-                                       timeout_s=int(body.get("timeout", 900)))
+                                       timeout_s=int(body.get("timeout", 900)),
+                                       progress=lambda pr: send(
+                                           {"progress": pr}))
         except Exception as exc:  # noqa: BLE001
-            self._json({"error": str(exc)}, 502)
+            send({"error": str(exc)})
+            done()
             return
 
         ASSETS.mkdir(parents=True, exist_ok=True)
@@ -5342,8 +5420,9 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 saved.append({"id": cur.lastrowid, "kind": f["kind"],
                               "url": f"/api/avatars/{fname}"})
-        self._json({"ok": True, "assets": saved, "prompt": p["prompt"],
-                    "workflow": wf["name"]})
+        send({"ok": True, "assets": saved, "prompt": p["prompt"],
+              "workflow": wf["name"]})
+        done()
 
     def _tool_reject(self) -> None:
         body = self._body()

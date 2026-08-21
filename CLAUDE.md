@@ -1830,6 +1830,35 @@ reached zero.
   every two minutes until the daily cap eats itself. On Termux the user
   needs `termux-wake-lock` or Android kills the server too — the settings
   hint says so.
+
+  **She attaches pictures to her own texts now, and initiates in chat.**
+  Measured before touching anything: gemma-4-12b self-initiated tool calls
+  1/4 on a normal card and 2/4 on an exhibitionist one — the spec granted
+  capability with zero license to initiate, and its closing "only when it
+  genuinely fits" read as a brake. After the rewrite (initiative stated
+  outright, plus the anti-fake rule: words that mention a picture must
+  carry the block) the same probes measure 3/4 and 4/4, and the remaining
+  normal-card miss was a fair character choice. TWO layers had to say it:
+  the spec grants initiative, but `text_first`'s tight output contract
+  (text/NOTHING/NEXT) implicitly excluded a tool block — 0/3 attachments
+  until the layer itself said a text can carry a picture; 1/1 after.
+  `_chat_text_first` includes the tools spec (it was simply absent from
+  that prompt, so she could not have known the format existed on that
+  path), parses the call instead of DISCARDING it (the old
+  `split_tool_call(text)[0]`), and registers a pending — approval still
+  rules, even when she texts first. `_studio_pending_from_tool` stashes
+  the display payload in the registry and `GET /api/tools/pending?chat_id=`
+  lists undelivered cards, which is how a daemon-sent "u really think i
+  can be good? 🙄" reaches a phone that was asleep when she sent it:
+  `loadPhone` renders the waiting card under her text. In-memory like the
+  rest of the registry — a restart drops them and she offers again.
+  Recipe calls only on this path. Verified end to end: unprompted text +
+  self-chosen selfie + pickup listing + SSE approval + asset landed on
+  her own message. `/api/tools/approve` streams the same SSE contract as
+  the studio routes now (both branches — user-table graphs and
+  `_tool_via_studio`); the raw-action branch is code-mirrored from the
+  proven shape but has not been live-run, since steering a model into a
+  free-form action call to order is a coin flip.
 - **Unread only shows on the minimised pill**, not in the page title. A
   `document.title` badge is ten lines.
 - ~~The tests litter the roster.~~ **Fixed.** `testkit.sweep_fixtures()` runs

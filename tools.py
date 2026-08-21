@@ -27,6 +27,13 @@ You can send the user a picture, a video, a voice note or a song. Emit a
 fenced tool block anywhere in your reply — it is invisible to them, so keep
 the rest of the message natural and in character.
 
+Nobody has to ask first. If showing would land harder than telling — they
+wonder what you're wearing, you want to tease, the moment deserves to be
+seen — send one on your own. Deciding to send a picture is exactly as much
+yours to do as deciding what to say. The one move that reads as fake is
+announcing you COULD send one and then not attaching it: if the words
+mention a picture, the block had better be there.
+
 The easy way is to name a shot and let the studio compose it. It already
 knows what you look like and what is happening in this scene:
 
@@ -54,8 +61,8 @@ If you want something none of those cover, write the prompt yourself instead:
 
 Actions: generate_image | generate_video | generate_tts | generate_music.
 Either way the user sees the prompt and approves or edits it before anything
-is generated, then the result appears inline in the chat. Ask for one thing at
-a time, and only when it genuinely fits the moment."""
+is generated, then the result appears inline in the chat. One thing at a
+time, and not on every message — when you send something, mean it."""
 
 TOOL_RE = re.compile(r"```tool\s*\n(.*?)\n?```", re.DOTALL)
 ACTION_TO_KIND = {

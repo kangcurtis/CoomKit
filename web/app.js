@@ -2291,9 +2291,14 @@ function showTool(tp) {
   go.onclick = async () => {
     go.disabled = true;
     status.textContent = 'generating on your box…';
-    const r = await post('/api/tools/approve', {
-      id: tp.id, prompt: div.querySelector('.tc-prompt').value,
-    });
+    const r = await studioStream('/api/tools/approve',
+      { id: tp.id, prompt: div.querySelector('.tc-prompt').value },
+      (m) => { status.textContent = m; },
+      (pr) => {
+        status.textContent = pr.queue != null && pr.queue > 0
+          ? `queued behind ${pr.queue} job(s)…`
+          : `rendering… ${Math.round(pr.elapsed)}s`;
+      });
     if (r.error) { status.textContent = 'failed: ' + r.error; go.disabled = false; return; }
     status.textContent = `done · ${r.workflow}`;
     const body = div.querySelector('.tool-card');
@@ -5258,6 +5263,14 @@ async function loadPhone() {
   syncPhoneAware();
   syncNudge();
   startNudging();
+  // Undelivered attachments: a picture she attached to a daemon-sent text
+  // waits in the pending registry until a phone opens. Rendered fresh on
+  // every load (the thread is rebuilt anyway); approving or rejecting
+  // removes it from the registry, so it stops reappearing.
+  try {
+    const pd = await api(`/api/tools/pending?chat_id=${S.phone.chat.id}`);
+    for (const p of (pd && pd.pending) || []) phoneStudio(p);
+  } catch { /* registry unreachable is not worth breaking the thread over */ }
   box.scrollTop = box.scrollHeight;
 }
 
@@ -6730,6 +6743,9 @@ async function nudgeCheck() {
         toast(`${S.phone.chat.name} texted you`);
       } else {
         phoneBubble('assistant', stripBlocks(r.text));
+        // She attached something to her unprompted text — the approval
+        // card lands right under it, like the photo it is about to be.
+        if (r.studio_pending) phoneStudio(r.studio_pending);
       }
     }
   } catch { /* offline or backend gone; try again next tick */ }
