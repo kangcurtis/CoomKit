@@ -1791,9 +1791,15 @@ reached zero.
   Termux notes for the README when it is: `pkg install python`, clone into
   `$HOME` (sqlite WAL cannot mmap on /sdcard FUSE), `restart.sh` needs
   `iproute2` and `curl` installed, `run.sh` needs nothing.
-- **The remake (⟳) path is still a blocking POST.** The approve path
-  streams progress; `_studio_remake` runs the same renders with the old
-  silent wait. Converting it is the same SSE dance a second time.
+- ~~The remake (⟳) path is still a blocking POST.~~ **Fixed** —
+  `_studio_remake` streams the same SSE contract as approve (everything
+  that can 4xx returns as JSON before the headers, so the content type is
+  honest), the client reader is one `studioStream(path, body, …)` for both
+  routes, and a remake-in-flight shows a live pending cell in the media
+  strip where the result will land. A video remake also feeds the same
+  per-workflow render-time history the approval card scales its bar
+  against. Verified live: an H3 ⟳ with a new seed streamed notes and
+  ticks for its whole render and delivered a different take.
 - ~~She only texts while the tab is open.~~ **Fixed — she texts on her own
   clock now, server-side and in character.** `server._texting_daemon` wakes
   every 120s and POSTs the ordinary `/api/chats/text-first` route at

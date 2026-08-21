@@ -3163,17 +3163,17 @@ $('recipeDraft').onclick = async () => {
   showStudioDraft(d);
 };
 
-// /api/studio/approve streams SSE now. One reader for every approve site:
-// {note} frames narrate (vram parking, fallbacks), {progress} frames tick
-// while ComfyUI works, and the last data frame is the result. The old shape
-// was a single blocking POST whose status text was written BEFORE the await
-// and never updated — a seven-minute video render behind a static
-// "rendering…" is indistinguishable from a hang.
-async function approveStream(id, values, onNote, onProgress) {
-  const resp = await fetch('/api/studio/approve', {
+// The studio's SSE routes (/api/studio/approve and /api/studio/remake) share
+// one reader: {note} frames narrate (vram parking, fallbacks), {progress}
+// frames tick while ComfyUI works, and the last data frame is the result.
+// The old shape was a single blocking POST whose status text was written
+// BEFORE the await and never updated — a seven-minute video render behind a
+// static "rendering…" is indistinguishable from a hang.
+async function studioStream(path, body, onNote, onProgress) {
+  const resp = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, values }),
+    body: JSON.stringify(body),
   });
   if ((resp.headers.get('Content-Type') || '').includes('json')) {
     return resp.json();   // the "no such pending job" 404 is plain JSON
@@ -3272,7 +3272,7 @@ function showStudioDraft(d) {
       status.after(bar);
     }
     const t0 = Date.now();
-    const r = await approveStream(d.id, values,
+    const r = await studioStream('/api/studio/approve', { id: d.id, values },
       (m) => { status.textContent = m; },
       (p) => {
         if (p.queue != null && p.queue > 0) {
@@ -3361,14 +3361,42 @@ async function remakeAsset(a, strip) {
   if (!go) return;
   const prompt = body.querySelector('.rm-prompt').value;
   const seed = (body.querySelector('input[name=rmseed]:checked') || {}).value || 'new';
-  toast('queued on your box…');
-  const r = await post('/api/studio/remake', { asset_id: a.id, prompt, seed });
+  // A live placeholder where the result will land, instead of one toast and
+  // four minutes of nothing. Elapsed-only for the bar scale: the workflow is
+  // only known when the final frame arrives, so a video crawls honestly.
+  const pending = document.createElement('div');
+  pending.className = 'remake-pending';
+  const pStatus = document.createElement('span');
+  pStatus.textContent = 'queued on your box…';
+  pending.appendChild(pStatus);
+  let pBar = null;
+  if (a.kind === 'video' || a.kind === 'videos') {
+    pBar = document.createElement('div');
+    pBar.className = 'tc-progress';
+    pBar.innerHTML = '<div class="tc-progress-fill crawl"></div>';
+    pending.appendChild(pBar);
+  }
+  strip.appendChild(pending);
+  const t0 = Date.now();
+  const r = await studioStream('/api/studio/remake',
+    { asset_id: a.id, prompt, seed },
+    (m) => { pStatus.textContent = m; },
+    (p) => {
+      pStatus.textContent = p.queue != null && p.queue > 0
+        ? `queued behind ${p.queue} job(s)…`
+        : `rendering… ${Math.round(p.elapsed)}s`;
+    });
+  pending.remove();
   if (r.error) { toast('failed: ' + r.error); return; }
   for (const n of r.assets) {
     strip.appendChild(assetCell(
       { ...n, prompt, seed: r.seed, recipe: a.recipe, can_remake: true }, strip));
   }
-  (r.notes || []).forEach(toast);
+  // Feed the same per-workflow history the approval card scales its bar
+  // against, so a remake teaches the next approve how long this box takes.
+  if (r.workflow && (a.kind === 'video' || a.kind === 'videos')) {
+    saveRenderTime(r.workflow, Date.now() - t0);
+  }
   loadGallery();
   renderVram(null);
 }
@@ -5583,7 +5611,7 @@ function phoneStudio(p) {
   go.onclick = async () => {
     go.disabled = no.disabled = true;
     $('phoneStatus').textContent = 'sending a photo…';
-    const r = await approveStream(p.id, undefined,
+    const r = await studioStream('/api/studio/approve', { id: p.id },
       (m) => { $('phoneStatus').textContent = m; },
       (pr) => {
         $('phoneStatus').textContent = pr.queue > 0

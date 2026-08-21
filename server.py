@@ -4707,7 +4707,26 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
         cfg = load_config()
-        notes = []
+
+        # SSE from here, same contract as _studio_approve: {note} frames as
+        # the run narrates, {progress} while ComfyUI works, one final result
+        # frame, [DONE]. The remake was the last blocking render path — a
+        # video ⟳ sat behind a frozen toast for its whole four minutes.
+        # Everything that can 4xx has already returned above, so the status
+        # line is honest.
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        def send(obj) -> bool:
+            try:
+                self.wfile.write(f"data: {json.dumps(obj)}\n\n".encode())
+                self.wfile.flush()
+                return True
+            except (BrokenPipeError, ConnectionResetError):
+                return False
 
         def read_asset(name: str):
             path = ASSETS / name
@@ -4715,22 +4734,24 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             result = studio.run(job, values, cfg, asset_path=read_asset,
-                                note=notes.append)
+                                note=lambda m: send({"note": m}),
+                                progress=lambda p: send({"progress": p}))
+            saved = self._save_assets(result["files"], job, values,
+                                      result.get("meta"))
+            send({"ok": True, "assets": saved,
+                  "workflow": result["workflow"],
+                  "seed": (result.get("meta") or {}).get(
+                      "values", {}).get("seed"),
+                  "vram": result["vram"].get("steps", [])})
         except (studio.StudioError, comfy.ComfyError) as exc:
-            self._json({"error": str(exc), "notes": notes}, 502)
-            return
+            send({"error": str(exc)})
         except Exception as exc:  # noqa: BLE001
-            self._json({"error": f"{type(exc).__name__}: {exc}",
-                        "notes": notes}, 502)
-            return
-
-        saved = self._save_assets(result["files"], job, values,
-                                  result.get("meta"))
-        self._json({"ok": True, "assets": saved, "notes": notes,
-                    "workflow": result["workflow"],
-                    "seed": (result.get("meta") or {}).get(
-                        "values", {}).get("seed"),
-                    "vram": result["vram"].get("steps", [])})
+            send({"error": f"{type(exc).__name__}: {exc}"})
+        try:
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     # Which keys of the job are needed to run it again. Everything here is
     # plain JSON already — studio.plan returns only primitives, lists and
