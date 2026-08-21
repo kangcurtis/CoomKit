@@ -9,6 +9,8 @@ import _bootstrap  # noqa: F401  — repo root on sys.path
 import json
 import urllib.request
 
+import testkit
+
 BASE = "http://127.0.0.1:3939"
 OR = "https://openrouter.ai/api/v1"
 MODEL = "moonshotai/kimi-k3"
@@ -26,7 +28,9 @@ def call(method, path, body=None):
 
 
 call("POST", "/api/prompts/reset", {})
-cid = call("GET", "/api/characters")["rows"][0]["id"]
+# A FIXTURE character, never rows[0] — that is the user's own on any
+# real install, and this file drives forge calls against it.
+cid = testkit.ensure_character()
 base_body = {"character_id": cid, "backend": OR, "model": MODEL,
              "count": 2, "use_memory": False}
 

@@ -51,7 +51,7 @@ DATA = ROOT / "data"
 ASSETS = DATA / "assets"
 DB_PATH = DATA / "coomkit.sqlite"
 CONFIG_PATH = DATA / "config.json"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 BACKEND_PRESETS = [
     ("LM Studio", "http://127.0.0.1:1234/v1"),
@@ -156,7 +156,13 @@ REMOTE_STOP_CAP = 4
 DEFAULT_CONFIG = {
     "port": 3939,
     "comfyui_url": "",
-    "remote_backends": [],  # [{"label": "OpenRouter", "url": "https://openrouter.ai/api/v1", "key": "..."}]
+    # [{"label": "OpenRouter", "url": "https://openrouter.ai/api/v1",
+    #   "key": "...", "vision": false}]
+    # `vision: true` is the ONE exception to vision-local-only: the user has
+    # explicitly said pictures may be sent to this backend (their own LM
+    # Studio on another LAN box, a trusted vision endpoint). Off by default,
+    # set per backend, never inferred.
+    "remote_backends": [],
     "defaults": {"temperature": 0.9, "top_p": 0.95, "top_k": 40,
                  "max_tokens": 2048, "context_tokens": 8192},
     # Which bundled workflow serves each media kind, and whether the optional
@@ -789,6 +795,13 @@ def _row_to_dict(r: sqlite3.Row) -> dict:
 # pitches from a picture and then commits the same picture through a second
 # path: two caps meant a file could be dropped from the pitch and accepted at
 # commit, and the user would be told neither.
+# How many times a turn that spent its whole budget thinking may be retried
+# with more room. Each try triples, so from a 1200-token preset this reaches
+# 1200 -> 3600 -> 10800 and then the 16000 ceiling. Two is measured, not
+# chosen: one escalation still left gemma-4-12b with in-character thinking
+# empty in 2 of 3 runs.
+MAX_THINK_ESCALATIONS = 2
+
 MAX_UPLOAD = 40 * 1024 * 1024
 MAX_UPLOAD_MB = MAX_UPLOAD // (1024 * 1024)
 
@@ -1100,7 +1113,32 @@ class Handler(BaseHTTPRequestHandler):
                 if key in incoming:
                     cfg[key] = incoming[key]
             if "remote_backends" in incoming:
-                cfg["remote_backends"] = incoming["remote_backends"]
+                # The GET route masks keys before they reach the browser, and
+                # the browser sends the WHOLE list back on any edit — so an
+                # incoming key that is empty or IS the mask means "keep what
+                # you have". Stored verbatim, adding a second backend (or
+                # flipping the vision toggle) silently replaced every other
+                # entry's real key with the "sk-abc..." stub, which then
+                # presents as 401s from a provider that worked yesterday.
+                # Deliberately keep-on-empty: clearing a key means re-adding
+                # the backend with a fresh one, or editing config.json.
+                stored = {}
+                for rb in cfg.get("remote_backends") or []:
+                    if isinstance(rb, dict):
+                        for k in (rb.get("url"), rb.get("label")):
+                            if k:
+                                stored.setdefault(k, rb)
+                merged = []
+                for rb in incoming["remote_backends"] or []:
+                    if isinstance(rb, dict):
+                        old = (stored.get(rb.get("url"))
+                               or stored.get(rb.get("label")))
+                        key = rb.get("key") or ""
+                        if old and old.get("key") and (
+                                not key or key == old["key"][:6] + "..."):
+                            rb = {**rb, "key": old["key"]}
+                    merged.append(rb)
+                cfg["remote_backends"] = merged
             CONFIG_PATH.write_text(json.dumps(cfg, indent=2) + "\n")
             self._json({"ok": True})
         elif url.path == "/api/chat":
@@ -1854,6 +1892,17 @@ class Handler(BaseHTTPRequestHandler):
                 # thing a re-roll must never do.
                 holding_id = engine.take_speaker(history[pos])
                 history = history[:pos]
+                # A re-roll of a reply to a picture must see the picture.
+                # `stored` was only ever populated on the fresh-send branch,
+                # so every regenerate answered blind — the take being
+                # replaced was written WITH the image in context. The
+                # filenames live on the user turn the take answers
+                # (messages.data.images, written at store time).
+                last_user = next((m for m in reversed(history)
+                                  if m["role"] == "user"), None)
+                if last_user:
+                    stored = list((last_user.get("data") or {})
+                                  .get("images") or [])
             else:
                 text = (body.get("text") or "").strip()
                 images = body.get("images") or []
@@ -1891,15 +1940,24 @@ class Handler(BaseHTTPRequestHandler):
             preset = (rows_get("presets", int(body["preset_id"]))
                       if body.get("preset_id") else None) or {"data": {}}
 
+            remotes = load_config().get("remote_backends", [])
             is_remote = any(
                 normalise_backend(rb.get("url", "")) == backend
-                for rb in load_config().get("remote_backends", []))
+                for rb in remotes)
+            # The local-only rule, with its one deliberate exception: a
+            # backend the user has flagged `vision: true` in settings may be
+            # shown pictures. Everything ELSE keyed on is_remote — prefill
+            # emulation, the stop cap, the export label — stays remote
+            # behaviour; only the image-withholding is opted out of.
+            vision_ok = not is_remote or any(
+                normalise_backend(rb.get("url", "")) == backend
+                and rb.get("vision")
+                for rb in remotes)
 
             # Raw /completions is text-only, so a turn carrying an image has
             # to borrow the chat endpoint. Decided here rather than after
             # assembly because the thinking layer depends on the final mode.
-            if (meta["mode"] == "completion" and stored and not is_remote
-                    and not regenerate):
+            if meta["mode"] == "completion" and stored and vision_ok:
                 meta["mode"] = "chat"
                 meta["vision_fallback"] = True
 
@@ -2128,23 +2186,37 @@ class Handler(BaseHTTPRequestHandler):
                 prefill = (trace.get("speaker_prefix") or "") \
                     + body["reply_prefill"]
 
-            # vision: inline uploaded images into the last user turn.
+            # vision: inline uploaded images into the CURRENT user turn — at
+            # the index the engine recorded, NOT messages[-1]. Depth-0 blocks
+            # (a card's post_history_instructions, cast_turn, an ST-imported
+            # injection) render after the history, so messages[-1] is a
+            # system message for exactly the cards people import; gated on it
+            # the picture was silently dropped with no note, and the model
+            # answered "take a look at this" blind — which reads as
+            # hallucination, not as a dropped upload.
             # LOCAL BACKENDS ONLY — a remote provider never receives pictures.
-            if not regenerate and stored and messages[-1]["role"] == "user":
-                if is_remote:
-                    messages[-1]["content"] += (
+            uidx = trace.get("last_user_idx")
+            if stored and uidx is not None:
+                if not vision_ok:
+                    messages[uidx]["content"] += (
                         "\n[the user showed an image, but it was not sent to "
                         "this remote model — respond in character without "
                         "pretending to see details]")
                 elif persist:
                     try:
-                        messages[-1] = llm.vision_message(
-                            messages[-1]["content"],
+                        messages[uidx] = llm.vision_message(
+                            messages[uidx]["content"],
                             [str(ASSETS / fn) for fn in stored])
-                    except Exception:  # noqa: BLE001 — fall back to text only
-                        pass
+                    except Exception:  # noqa: BLE001 — say so, don't vanish
+                        # A file missing from data/assets/ must not become a
+                        # silent drop — that is the exact failure shape this
+                        # block exists to end.
+                        messages[uidx]["content"] += (
+                            "\n[an image was attached but could not be read "
+                            "back from disk — answer without it, without "
+                            "pretending to see it]")
                 else:
-                    messages[-1]["content"] += (
+                    messages[uidx]["content"] += (
                         f"\n[+{len(stored)} image(s) attached inline: "
                         f"{', '.join(stored)}]")
 
@@ -2166,10 +2238,22 @@ class Handler(BaseHTTPRequestHandler):
             # the floor, which is why the thinking selector did nothing at all
             # against LM Studio. Pass it through so the toggle reaches the
             # server's chat template.
+            # thinking_prefill reaches chat mode at last. It used to be read
+            # only by render_prompt (completion mode), so on a chat-mode
+            # backend the reasoning prefill — the strongest jailbreak vector
+            # this project has — was silently never sent at all, and the
+            # inspector showed a field that did nothing. Moonshot's partial
+            # mode is the one chat-mode wire format that carries it; models
+            # that do not take it are unaffected (llm.build_payload gates on
+            # the id), so no existing turn changes.
+            meta["partial_prefill"] = bool(
+                meta["thinking_prefill"] and meta["thinking"]
+                and llm.wants_partial_reasoning(model))
             payload = llm.build_payload(messages, model, samplers,
                                         prefill=prefill, stream=True,
                                         force_prefill=is_remote,
-                                        thinking=meta["thinking"])
+                                        thinking=meta["thinking"],
+                                        thinking_prefill=meta["thinking_prefill"])
 
         meta["context_tokens"] = ctx
         # so a model swap loads at the window this turn was budgeted against
@@ -2179,7 +2263,8 @@ class Handler(BaseHTTPRequestHandler):
                 "prefill": prefill, "backend": backend, "key": key,
                 "model": model, "samplers": samplers, "chat_row": chat_row,
                 "swipe_target": swipe_target, "stored": stored,
-                "is_remote": is_remote, "regenerate": regenerate}
+                "is_remote": is_remote, "vision_ok": vision_ok,
+                "regenerate": regenerate}
 
     def _chat_preview(self) -> None:
         """POST /api/chats/preview — the exact payload, nothing sent anywhere.
@@ -2249,6 +2334,7 @@ class Handler(BaseHTTPRequestHandler):
             "backend": req["backend"],
             "model": req["model"],
             "is_remote": req["is_remote"],
+            "vision_ok": req["vision_ok"],
             "vision_fallback": bool(meta.get("vision_fallback")),
             "thinking": meta.get("thinking"),
             "thinking_mode": meta.get("thinking_mode"),
@@ -2335,6 +2421,22 @@ class Handler(BaseHTTPRequestHandler):
                               "avatar": meta.get("speaker_avatar", ""),
                               "reason": meta.get("speaker_reason", "")}})
 
+        # A prefill is only part of the reply when the backend GENUINELY
+        # continues it. Local llama.cpp / LM Studio / TabbyAPI do; a remote
+        # is emulated — build_payload asks in-band for a reply beginning with
+        # that text, which CLAUDE.md calls "a soft request the model may
+        # decline" and the UI badges as emulated. Prepending it anyway
+        # fabricated text the model never wrote: measured on kimi-k3, a
+        # jailbreak scaffold prefill ("I should continue the story…") was
+        # stapled to the front of every stored reply and rendered in the
+        # bubble, while the stream showed the prose alone — so it appeared
+        # only after a reload. If the model DOES comply the text arrives in
+        # reply_parts on its own, where it belongs.
+        # …with one exception: Moonshot partial mode is a REAL continuation,
+        # not an instruction, so a reply prefill sent that way is genuinely
+        # the start of the reply and has to be kept.
+        stored_prefill = prefill if (not req["is_remote"]
+                                     or meta.get("partial_prefill")) else ""
         reply_parts, think_parts = [], []
         try:
             for kind, chunk_text in llm.stream(
@@ -2352,21 +2454,43 @@ class Handler(BaseHTTPRequestHandler):
             send({"error": str(exc)})
             return
 
-        reply = (prefill + "".join(reply_parts)).strip()
+        reply = (stored_prefill + "".join(reply_parts)).strip()
         # Thinking models can spend the entire budget before the first visible
         # word — measured repeatedly on gemma-4-12b. `llm.once_retry` covers
         # the non-streaming helpers; the streamed turn had nothing, so it just
-        # landed as a blank message and read as "she said nothing". Escalate
-        # once, the same way once_retry does.
-        if not reply and think_parts:
-            bigger = dict(payload)
-            current = int(bigger.get("max_tokens") or 1024)
+        # landed as a blank message and read as "she said nothing".
+        #
+        # Escalating ONCE is not enough, and the reason is worth stating
+        # because it is easy to reach for a cleverer formula instead: the
+        # failed attempt tells you nothing about how much room the model
+        # NEEDS, only that it needs more than it had — its reasoning is
+        # capped by the very budget it exhausted, so any arithmetic on
+        # "how much it thought" is bounded by the number that already
+        # failed. Measured on gemma-4-12b with in-character thinking (the
+        # worst case: the persona makes the reasoning discursive), a single
+        # 3x escalation from 1200 to 3600 still came back empty in 2 of 3
+        # runs. So keep tripling until there is a reply or the ceiling is
+        # reached, and say so each time.
+        tries = 0
+        while not reply and think_parts and tries < MAX_THINK_ESCALATIONS:
+            current = int(payload.get("max_tokens") or 1024)
             # A multiplier alone is useless when the original budget was tiny —
             # 2.5x of 120 is still less than this model's reasoning. Jump to a
             # floor that can actually hold reasoning plus a reply.
-            bigger["max_tokens"] = min(16000, max(current * 3, 2048))
+            bigger = dict(payload, max_tokens=min(16000, max(current * 3, 2048)))
+            if bigger["max_tokens"] <= current:
+                break                       # already at the ceiling
+            tries += 1
+            payload = bigger
             send({"notice": "she spent the whole budget thinking — retrying "
                             f"with {bigger['max_tokens']} tokens"})
+            # The abandoned attempt's output must not be carried forward. Its
+            # reasoning would otherwise be stored alongside the take that
+            # replaced it — the thought panel showing the discarded train of
+            # thought concatenated with the kept one, thousands of characters
+            # of it on a heavy reasoner (measured on kimi-k3: 14k stored for a
+            # reply whose own reasoning was a fraction of that).
+            think_parts, reply_parts = [], []
             try:
                 for kind, chunk_text in llm.stream(
                         backend, key, bigger, meta["mode"],
@@ -2382,7 +2506,20 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001
                 send({"error": str(exc)})
                 return
-            reply = (prefill + "".join(reply_parts)).strip()
+            reply = (stored_prefill + "".join(reply_parts)).strip()
+
+        # Still nothing, and no reasoning to blame it on. A hosted model that
+        # declines by returning an EMPTY completion is a real refusal mode —
+        # measured on kimi-k3 with thinking off, which answers explicit
+        # prompts with zero tokens and no error. The escalation above cannot
+        # help (there is no thinking to give room to), and storing the blank
+        # silently is the worst of both: an empty bubble that reads as CoomKit
+        # being broken rather than as the model refusing. Say which it was.
+        if not reply and not think_parts:
+            send({"notice": "the model returned nothing at all — usually a "
+                            "quiet refusal on a hosted provider. try a "
+                            "jailbreak, a reply prefill, or a different "
+                            "model; nothing was saved."})
 
         think = "".join(think_parts)
         visible, tool_call = tools.split_tool_call(reply)
@@ -2424,26 +2561,36 @@ class Handler(BaseHTTPRequestHandler):
             "mode": meta.get("mode", "chat"),
             "samplers": req.get("samplers") or {},
         }
-        with get_db() as conn:
-            if swipe_target is not None:
-                engine.add_swipe(conn, swipe_target, visible, data)
-                msg_id = swipe_target
-            else:
-                msg_id = engine.add_message(
-                    conn, chat_id, "assistant", visible, data)
-            if leaked:
-                # Counted per chat, because one trimmed reply is the system
-                # working and a steady trickle of them is the model telling
-                # you the scene has too many people in it for its size.
-                cd = json.loads(chat_row["data"] or "{}") \
-                    if chat_row["data"] else {}
-                cd["cast_leaks"] = int(cd.get("cast_leaks") or 0) + 1
-                conn.execute("UPDATE chats SET data=? WHERE id=?",
-                             (json.dumps(cd), chat_id))
-                send({"notice": f"she started writing {leaked} — trimmed"})
-                if cd["cast_leaks"] == 3:
-                    send({"notice": "this model keeps writing everyone. Try "
-                                    "two people in the scene instead of four."})
+        # A turn that produced NOTHING — no prose, no reasoning, no tool call,
+        # no director note — is not stored. There is nothing in it to read, and
+        # storing it costs twice: a blank bubble in the log that reads as
+        # CoomKit breaking rather than the model declining, and (on a re-roll)
+        # a blank swipe REPLACING a take that was fine. The user's own message
+        # is already stored, so the scene is intact and they can simply send
+        # again. The notice above says what happened.
+        msg_id = None
+        empty_turn = not (visible.strip() or think.strip() or tool_call or note)
+        if not empty_turn:
+            with get_db() as conn:
+                if swipe_target is not None:
+                    engine.add_swipe(conn, swipe_target, visible, data)
+                    msg_id = swipe_target
+                else:
+                    msg_id = engine.add_message(
+                        conn, chat_id, "assistant", visible, data)
+                if leaked:
+                    # Counted per chat, because one trimmed reply is the system
+                    # working and a steady trickle of them is the model telling
+                    # you the scene has too many people in it for its size.
+                    cd = json.loads(chat_row["data"] or "{}") \
+                        if chat_row["data"] else {}
+                    cd["cast_leaks"] = int(cd.get("cast_leaks") or 0) + 1
+                    conn.execute("UPDATE chats SET data=? WHERE id=?",
+                                 (json.dumps(cd), chat_id))
+                    send({"notice": f"she started writing {leaked} — trimmed"})
+                    if cd["cast_leaks"] == 3:
+                        send({"notice": "this model keeps writing everyone. Try "
+                                        "two people in the scene instead of four."})
         if note:
             send({"director_note": note})
         send({"done": True, "message_id": msg_id, "full": visible})
@@ -4029,13 +4176,20 @@ class Handler(BaseHTTPRequestHandler):
         # works — she is told in-band that there was a picture and answers
         # around it. There is no equivalent here: a pitch built from an image
         # nobody saw is just the ordinary forge with extra steps, and it would
-        # be indistinguishable from the feature working. So refuse and say so.
-        if any(rb.get("url") and normalise_backend(rb["url"]) == backend
-               for rb in load_config().get("remote_backends", [])):
+        # be indistinguishable from the feature working. So refuse and say so
+        # — unless the user has flagged THIS backend `vision: true` in
+        # settings, in which case the picture really is sent and the whole
+        # indistinguishable-failure argument evaporates with it.
+        matches = [rb for rb in load_config().get("remote_backends", [])
+                   if rb.get("url")
+                   and normalise_backend(rb["url"]) == backend]
+        if matches and not any(rb.get("vision") for rb in matches):
             self._json({"error": "vision is local-only — the picture never "
                                  "leaves this machine, so a remote backend "
                                  "cannot be shown it. Point CoomKit at your "
-                                 "local model for this one, or describe her "
+                                 "local model for this one, tick 'send "
+                                 "images' on that backend in ⚙ → backends "
+                                 "if it is really yours, or describe her "
                                  "in the brief under ☆ a whole character."},
                        400)
             return

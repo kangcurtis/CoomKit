@@ -136,11 +136,40 @@ def default_stops(template: str) -> list[str]:
 # Payload builders
 # ----------------------------------------------------------------------
 
+# Moonshot's "partial mode": a trailing assistant message carrying
+# `reasoning_content` with `partial: true` seeds the model's THOUGHT channel
+# and it continues from there — the same vector that makes a local reasoning
+# prefill the strongest jailbreak available, except it survives the hop to a
+# hosted provider because it is a documented API feature rather than a
+# template trick. Measured against moonshotai/kimi-k3 through OpenRouter:
+# with no prefill it refuses an explicit scene outright ("I'm not going to
+# write explicit sexual content"); with one it writes the scene, and its
+# reasoning visibly CONTINUES the seeded sentence. It also thinks far less
+# (1373 -> 327 chars), because the deliberation is already settled.
+#
+# Gated on the model id and not sent to everyone: `partial` is Moonshot
+# semantics, and a provider that does not know the key can reject the whole
+# request — which costs the turn. Same list the ST extension that documented
+# this uses.
+#
+# `partial: true` IS the continuation signal here, so no
+# `continue_final_message` rides along: a reply prefill in `content` is
+# genuinely continued by Moonshot. There is no local case to hedge for —
+# nobody is running a trillion-parameter K3 at home.
+PARTIAL_REASONING_MODELS = ("kimi", "moonshot")
+
+
+def wants_partial_reasoning(model: str) -> bool:
+    """Does this model take a reasoning prefill as a partial assistant turn?"""
+    m = (model or "").lower()
+    return any(tag in m for tag in PARTIAL_REASONING_MODELS)
+
 
 def build_payload(messages: list[dict], model: str, samplers: dict,
                   prefill: str = "", stream: bool = True,
                   force_prefill: bool = False,
-                  thinking: bool | None = None) -> dict:
+                  thinking: bool | None = None,
+                  thinking_prefill: str = "") -> dict:
     """Chat (instruct) payload. Prefill = trailing assistant message.
 
     Providers differ: llama.cpp / LM Studio / TabbyAPI continue a trailing
@@ -172,6 +201,18 @@ def build_payload(messages: list[dict], model: str, samplers: dict,
             payload[key] = samplers[key]
     if samplers.get("stop"):
         payload["stop"] = samplers["stop"]
+    # A reasoning prefill that actually survives a hosted provider. It has to
+    # be the LAST message, and it carries the reply prefill as its `content`
+    # when there is one — partial mode continues both channels, so appending
+    # a second trailing assistant turn below would be malformed.
+    if thinking_prefill and thinking is not False \
+            and wants_partial_reasoning(model):
+        payload["include_reasoning"] = True
+        payload["messages"].append({"role": "assistant",
+                                    "content": prefill or "",
+                                    "reasoning_content": thinking_prefill,
+                                    "partial": True})
+        return payload
     if prefill:
         if force_prefill and payload["messages"]:
             first = payload["messages"][0]

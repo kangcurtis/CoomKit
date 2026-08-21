@@ -7,11 +7,12 @@ real assembly path — rather than trusting the prompts module in isolation.
 """
 
 import _bootstrap  # noqa: F401  — repo root on sys.path
-import base64
 import json
 import sys
 import urllib.request
 from pathlib import Path
+
+import testkit
 
 HERE = _bootstrap.ROOT
 
@@ -75,16 +76,14 @@ for key in recipe_layers:
 print(f"recipes: {len(recipe_layers)} briefs editable")
 
 # ── 2. fixture chat ──────────────────────────────────────────────
-rows = call("GET", "/api/characters")["rows"]
-if rows:
-    cid = rows[0]["id"]
-else:
-    synth = {"spec": "chara_card_v2", "data": {
-        "name": "Fixture-chan", "description": "a smug lab assistant",
-        "first_mes": "hi"}}
-    cid = call("POST", "/api/cards/import", {
-        "filename": "f.json",
-        "b64": base64.b64encode(json.dumps(synth).encode()).decode()})["id"]
+# A FIXTURE character, never rows[0]. Taking whatever the roster held first
+# means adopting the user's OWN character on any real install — and this file
+# then created an rp chat AND an sms chat on her, every single suite run,
+# neither of them swept because they do not belong to a fixture. Measured on
+# the dev box: the shipped starter had collected 121 chats that way. Same bug
+# testkit.ensure_character exists to end, and the same one already fixed in
+# test_scenarios and test_library.
+cid = testkit.ensure_character()
 
 chat = call("POST", "/api/chats/new", {"character_id": cid})["chat_id"]
 sms = call("POST", "/api/chats/new",

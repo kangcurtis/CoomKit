@@ -1033,8 +1033,40 @@ audio.gal-thumb {
 /* loras + tag chips */
 .mini-block { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
 .mini-block h4 { margin: 0; color: var(--second-lit); font-size: 12px; font-weight: 600; }
-.lora-row { display: grid; grid-template-columns: 1fr 68px 26px; gap: 5px; margin-top: 5px; align-items: center; }
-.lora-row select, .lora-row input { margin: 0; }
+.lora-row { display: grid; grid-template-columns: 1fr 68px 26px; gap: 5px; margin-top: 5px; align-items: center; position: relative; }
+.lora-row input { margin: 0; }
+/* The name is a button + filterable popover (same reason as the model
+   picker: hundreds of files, a native select cannot be searched). Anchored
+   to the row, so position: relative above is load-bearing. */
+.lora-name-btn {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: left; padding: 6px 8px; border: 1px solid var(--line);
+  border-radius: var(--r-s); background: var(--surface-2); color: var(--text);
+  font-size: 12px; cursor: pointer;
+}
+.lora-name-btn:hover { border-color: var(--accent-deep); }
+.lora-name-btn.unset { color: var(--text-mute); }
+.lora-pick {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 40;
+  width: 100%; padding: 8px; border: 1px solid var(--line-lit);
+  border-radius: var(--r-s); background: var(--surface-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.lora-pick input { width: 100%; margin: 0; }
+.lora-pick-list {
+  max-height: 240px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.lora-pick-row {
+  display: block; width: 100%; padding: 5px 7px; border: 0; border-radius: 8px;
+  background: none; color: var(--text); font-size: 12px; text-align: left;
+  cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lora-pick-row:hover { background: var(--surface-3); }
+.lora-pick-row.sel { color: var(--accent); }
+.lora-pick-row.unset { color: var(--text-mute); }
+.lora-pick-none { color: var(--text-mute); font-size: 12px; padding: 6px; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 .tag-chip {
   display: inline-flex; align-items: center; gap: 4px;

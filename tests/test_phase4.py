@@ -55,10 +55,29 @@ def call(method, path, body=None, raw=False):
         return r.read() if raw else json.loads(r.read().decode())
 
 
+def hosted_preset():
+    """The preset a real user picks for a hosted model, by name not by id.
+
+    Without one K3 gets no jailbreak and no reasoning prefill, and it answers
+    anything adult with an EMPTY completion — a quiet refusal, no error. This
+    test then failed at "no memories after a live exchange", blaming the
+    memory system for a reply that never existed.
+    """
+    for p in call("GET", "/api/presets")["rows"]:
+        if p["name"].startswith("Hosted API"):
+            return p["id"]
+    return None
+
+
+PRESET_ID = hosted_preset()
+
+
 def send(chat_id, text, extra=None):
     body = {"chat_id": chat_id, "backend": "https://openrouter.ai/api/v1",
             "model": "moonshotai/kimi-k3", "text": text,
             "samplers": {"max_tokens": 1200, "temperature": 0.8}, **(extra or {})}
+    if PRESET_ID and "preset_id" not in body:
+        body["preset_id"] = PRESET_ID
     req = urllib.request.Request(BASE + "/api/chats/send",
                                  data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
@@ -87,18 +106,42 @@ pid = call("POST", "/api/personas",
 chat_id = call("POST", "/api/chats/new",
                {"character_id": cid, "persona_id": pid})["chat_id"]
 
-reply = send(chat_id, "full disclosure: i have a HUGE praise kink. please be gentle")
-print("reply:", (reply or "")[:150].replace("\n", " "))
-
-# memory extraction is async; wait then check
-mems = []
-for _ in range(30):
-    time.sleep(2)
-    mems = call("GET", f"/api/chats/{chat_id}/memories")["memories"]
+# Extraction fires every Nth assistant reply (memory.should_extract,
+# default 4, and the greeting counts) AND only when the reply was non-empty.
+# One exchange can therefore never trigger it — this test was written when
+# extraction was per-turn and quietly stopped being able to pass when the
+# cadence was fixed. It also cannot assume every turn lands: a hosted model
+# occasionally returns nothing, and a turn that produced no reply is skipped
+# for extraction, which is correct behaviour and not something to fail on.
+# So: keep offering facts until memories appear, and say what happened.
+FACTS = [
+    "full disclosure: i have a HUGE praise kink. please be gentle",
+    "also i'm deathly afraid of moths. don't ask.",
+    "and my favourite food is katsu curry, since you asked",
+    "one more thing — i work night shifts at a hospital",
+    "i'm allergic to shellfish too, which ruins most dates",
+    "i grew up in osaka, if that explains anything",
+    "i can't drive. never learned.",
+    "my sister and i haven't spoken in three years",
+]
+mems, empties = [], 0
+for i, fact in enumerate(FACTS, 1):
+    reply = send(chat_id, fact)
+    if not (reply or "").strip():
+        empties += 1
+    print(f"reply {i}: {(reply or '(empty)')[:110].replace(chr(10), ' ')}")
+    # extraction is async and runs in a background thread
+    for _ in range(8):
+        time.sleep(2)
+        mems = call("GET", f"/api/chats/{chat_id}/memories")["memories"]
+        if mems:
+            break
     if mems:
+        print(f"memories appeared after {i} exchange(s); {empties} empty repl(y/ies)")
         break
 print("memories extracted:", [m["content"] for m in mems])
-assert mems, "no memories at all after a live exchange"
+assert mems, (f"no memories after {len(FACTS)} live exchanges "
+              f"({empties} of them empty replies)")
 assert any(m["scope"] in ("user", "character", "chat") for m in mems), mems
 
 # memory toggle off/on

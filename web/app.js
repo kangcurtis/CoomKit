@@ -486,6 +486,10 @@ document.addEventListener('keydown', (e) => {
 function renderBackendList(remotes) {
   const ul = $('backendList');
   if (!ul) return;
+  // Post-probe repaints call this with no argument; the config was stored on
+  // S.cfg at load, and the toggle state has to come from somewhere real.
+  remotes = remotes || (S.cfg && S.cfg.remote_backends) || [];
+  const stripped = (u) => (u || '').replace(/\/+$/, '');
   ul.innerHTML = '';
   if (!BACKENDS.length) {
     ul.innerHTML = '<li class="mem-empty">Nothing answered. Start LM Studio / llama-server, or add a remote below.</li>';
@@ -495,6 +499,35 @@ function renderBackendList(remotes) {
     const li = document.createElement('li');
     li.innerHTML = `<b>${esc(b.label)}</b> ${b.remote ? '<span class="badge alt">remote</span>' : ''}
       <div class="note">${esc(b.url)} · ${b.models.length} model${b.models.length === 1 ? '' : 's'}</div>`;
+    if (b.remote) {
+      // The one deliberate exception to vision-local-only, set per backend
+      // and never inferred: pictures may be sent HERE because the user said
+      // this endpoint is really theirs. The server's config merge keeps
+      // stored keys through this round-trip, so flipping the toggle cannot
+      // clobber another entry's credentials.
+      const rb = remotes.find((r) => stripped(r.url) === stripped(b.url))
+              || remotes.find((r) => r.label === b.label);
+      const lab = document.createElement('label');
+      lab.className = 'check';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!(rb && rb.vision);
+      cb.onchange = async () => {
+        const cfg = await api('/api/config');
+        const list = cfg.remote_backends || [];
+        const hit = list.find((r) => stripped(r.url) === stripped(b.url))
+                 || list.find((r) => r.label === b.label);
+        if (!hit) { cb.checked = false; toast('that backend is not in the config any more'); return; }
+        hit.vision = cb.checked;
+        await post('/api/config', { remote_backends: list });
+        if (S.cfg) S.cfg.remote_backends = list;
+        toast(cb.checked
+          ? `${b.label} gets your pictures now — they leave this machine`
+          : `${b.label} is back to text-only`);
+      };
+      lab.append(cb, document.createTextNode(' send images (pictures leave this machine)'));
+      li.appendChild(lab);
+    }
     ul.appendChild(li);
   }
 }
@@ -1458,15 +1491,21 @@ async function openChat(charId, mode = 'rp') {
     return;
   }
   const key = c.id + ':' + mode;
+  // chatsByChar is a last-opened CACHE, not the truth — and it lives in
+  // localStorage, so it outlives the database. A cached id is validated
+  // against the server's list before it is trusted: after a db wipe (or a
+  // datapack pull, or a chat deleted from another browser) the stale pointer
+  // used to be opened directly, loadChat 404'd, and the user read
+  // "chat missing (db reset?)" on a character they imported five seconds
+  // ago. Worse, a stale id that happens to EXIST in the new database can
+  // belong to a different character entirely — the rows check covers both.
+  const rows = await chatsFor(c.id, mode);
   let chatId = S.chatsByChar[key];
-  // chatsByChar is a last-opened CACHE, not the truth. It used to be the only
-  // record that a chat existed, so clearing site data (or opening a second
-  // browser) made openChat create another row and strand the old adventure in
-  // sqlite forever — indistinguishable, from the outside, from deletion.
-  if (!chatId) {
-    const rows = await chatsFor(c.id, mode);
-    if (rows.length) chatId = rows[0].id;
+  if (chatId && !rows.some((r) => r.id === chatId)) {
+    delete S.chatsByChar[key];
+    chatId = null;
   }
+  if (!chatId && rows.length) chatId = rows[0].id;
   if (!chatId) chatId = await newChatFor(c, mode);
   if (!chatId) return;
   await openChatById(c, chatId, mode);
@@ -1655,6 +1694,14 @@ async function loadChat() {
   if (!S.chat) return;
   const d = await api('/api/chats/' + S.chat.id);
   if (!d || d.error || !Array.isArray(d.messages)) {
+    // Drop the pointer openChatById just re-cached, or every later click on
+    // this character replays the same dead id — the "db reset?" loop. With
+    // openChat validating against the server this is a last resort for a db
+    // wiped mid-session, not the first-click experience after an import.
+    if (!S.chat.plain && S.chat.charId != null) {
+      delete S.chatsByChar[S.chat.charId + ':' + S.chat.mode];
+      saveUI();
+    }
     $('chatSub').textContent = 'chat missing (db reset?). start a new one';
     return;
   }
@@ -2540,7 +2587,11 @@ $('btnInspect').onclick = async () => {
   $('inspStats').textContent =
     `${s.messages} message${s.messages === 1 ? '' : 's'} · ${s.chars.toLocaleString()} chars · ~${s.approx_tokens.toLocaleString()} tokens · system block ${s.system_chars.toLocaleString()} chars`;
   const warns = [];
-  if (r.is_remote) warns.push('remote provider: reasoning prefill is stripped upstream, images are not sent');
+  if (r.is_remote) {
+    warns.push(r.vision_ok
+      ? 'remote provider: reasoning prefill is stripped upstream. images ARE sent — you enabled that for this backend'
+      : 'remote provider: reasoning prefill is stripped upstream, images are not sent');
+  }
   if (r.vision_fallback) warns.push('image attached: this turn uses the chat endpoint instead of raw completion, because /completions cannot carry pictures');
   if (r.prefill && r.is_remote) warns.push('reply prefill is emulated as an instruction here, not a true continuation');
   $('inspWarn').textContent = warns.length ? '⚠ ' + warns.join(' · ') : '';
@@ -3020,11 +3071,16 @@ document.addEventListener('keydown', (e) => {
 });
 $('reprobe').onclick = async () => { setStatus('busy', 'probing…'); await loadBackends(); toast('probed'); };
 $('rbAdd').onclick = async () => {
+  // The list round-trips through /api/config, which masks stored keys — the
+  // server's merge keeps a stored key when the incoming one is empty or the
+  // mask, so re-POSTing the whole list is safe for the OTHER entries too.
   const cfg = await api('/api/config');
   const list = (cfg.remote_backends || []).filter((b) => b.label !== $('rbLabel').value.trim());
-  list.push({ label: $('rbLabel').value.trim(), url: $('rbUrl').value.trim(), key: $('rbKey').value.trim() });
+  list.push({ label: $('rbLabel').value.trim(), url: $('rbUrl').value.trim(),
+              key: $('rbKey').value.trim(), vision: $('rbVision').checked });
   await post('/api/config', { remote_backends: list });
   $('rbKey').value = '';
+  $('rbVision').checked = false;
   toast('backend added');
   loadBackends();
 };
@@ -4226,36 +4282,147 @@ async function loadLoras(force) {
 }
 
 function loraRow(entry = {}) {
+  // The name is a button + filterable popover, not a <select> — the list is
+  // read live from the user's ComfyUI and routinely runs to hundreds of
+  // files, which a native dropdown cannot search. Same pattern (and the same
+  // reason) as the topbar model picker; built as elements like the cast
+  // picker, because dynamic ids are invisible to tests/test_frontend.py.
+  // The row's dataset.name is the single source of truth the readers
+  // (loraValues, syncLoraCount) and the loraRefresh round-trip consume.
   const row = document.createElement('div');
   row.className = 'lora-row';
-  const known = S.loras || [];
-  let opts = known.map((n) =>
-    `<option value="${esc(n)}"${n === entry.name ? ' selected' : ''}>${esc(n)}</option>`).join('');
-  // A name the live probe did not return is kept and badged, never dropped.
-  // studio.review warns at approval and studio.run strips it at render, so
-  // holding on to it is safe — silently deleting a lora because ComfyUI
-  // happened to be down is not. The server side already promises exactly
-  // this ("a flaky probe must never silently strip a LoRA the user does
-  // have"); the card editor was doing the opposite.
-  if (entry.name && !known.includes(entry.name)) {
-    opts += `<option value="${esc(entry.name)}" selected>${esc(entry.name)}, not on this ComfyUI</option>`;
-  }
-  row.innerHTML = `<select class="lora-name"><option value="">— pick a lora —</option>${opts}</select>`
-    + `<input class="lora-strength" type="number" step="0.05" min="-2" max="3" value="${entry.strength ?? 1}">`
-    + `<button class="mini-btn lora-del">✕</button>`;
-  row.querySelector('.lora-del').onclick = () => { row.remove(); syncLoraCount(); };
+  row.dataset.name = entry.name || '';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'lora-name-btn';
+  const label = () => {
+    const n = row.dataset.name;
+    const known = S.loras || [];
+    btn.classList.toggle('unset', !n);
+    // A name the live probe did not return is kept and badged, never
+    // dropped. studio.review warns at approval and studio.run strips it at
+    // render, so holding on to it is safe — silently deleting a lora
+    // because ComfyUI happened to be down is not.
+    btn.textContent = n
+      ? n + ((known.includes(n)) ? '' : ' — not on this ComfyUI')
+      : '— pick a lora —';
+    btn.title = n;
+  };
+  label();
+  btn.onclick = () => loraPick(row, btn, label);
+  const num = document.createElement('input');
+  num.className = 'lora-strength';
+  num.type = 'number';
+  num.step = '0.05'; num.min = '-2'; num.max = '3';
+  num.value = String(entry.strength ?? 1);
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'mini-btn lora-del';
+  del.textContent = '✕';
+  del.onclick = () => { row.remove(); syncLoraCount(); };
+  row.append(btn, num, del);
   return row;
+}
+
+function loraPick(row, btn, label) {
+  const open = document.querySelector('.lora-pick');
+  const wasHere = open && open.parentElement === row;
+  if (open) open.remove();
+  if (wasHere) return;                 // same button again = toggle shut
+  const known = S.loras || [];
+  const pop = document.createElement('div');
+  pop.className = 'lora-pick';
+  const inp = document.createElement('input');
+  inp.type = 'search';
+  inp.placeholder = known.length > 12
+    ? `filter ${known.length} loras…` : 'pick one';
+  const list = document.createElement('div');
+  list.className = 'lora-pick-list';
+  const close = () => {
+    pop.remove();
+    document.removeEventListener('mousedown', away);
+  };
+  const away = (e) => {
+    if (!pop.contains(e.target) && e.target !== btn) close();
+  };
+  const pick = (name) => {
+    row.dataset.name = name;
+    label();
+    close();
+    syncLoraCount();
+  };
+  const paint = (q) => {
+    list.innerHTML = '';
+    const needle = (q || '').trim().toLowerCase();
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'lora-pick-row unset';
+    clear.textContent = '— none —';
+    clear.onclick = () => pick('');
+    list.appendChild(clear);
+    // The current name may be missing from the live list (ComfyUI down, or
+    // the file gone); it stays pickable so reopening the popover is never a
+    // silent delete.
+    const cur = row.dataset.name;
+    if (cur && !known.includes(cur)
+        && (!needle || cur.toLowerCase().includes(needle))) {
+      const keep = document.createElement('button');
+      keep.type = 'button';
+      keep.className = 'lora-pick-row sel';
+      keep.textContent = cur + ' — not on this ComfyUI';
+      keep.title = cur;
+      keep.onclick = () => pick(cur);
+      list.appendChild(keep);
+    }
+    const hits = known.filter(
+      (n) => !needle || n.toLowerCase().includes(needle));
+    for (const n of hits.slice(0, 60)) {
+      const r = document.createElement('button');
+      r.type = 'button';
+      r.className = 'lora-pick-row' + (n === cur ? ' sel' : '');
+      r.textContent = n;               // never trust as markup
+      r.title = n;
+      r.onclick = () => pick(n);
+      list.appendChild(r);
+    }
+    if (hits.length > 60) {
+      const more = document.createElement('div');
+      more.className = 'lora-pick-none';
+      more.textContent = `${hits.length - 60} more — keep typing`;
+      list.appendChild(more);
+    } else if (!hits.length) {
+      const none = document.createElement('div');
+      none.className = 'lora-pick-none';
+      none.textContent = 'nothing by that name';
+      list.appendChild(none);
+    }
+  };
+  inp.oninput = () => paint(inp.value);
+  inp.onkeydown = (e) => {
+    if (e.key === 'Escape') close();
+    if (e.key === 'Enter') {
+      const first = list.querySelector('.lora-pick-row:not(.unset)');
+      if (first) first.click();
+    }
+  };
+  pop.append(inp, list);
+  row.appendChild(pop);
+  paint('');
+  inp.focus();
+  // Deferred so the opening click doesn't immediately close it.
+  setTimeout(() => document.addEventListener('mousedown', away), 0);
 }
 
 function syncLoraCount() {
   $('loraCount').textContent = String(
-    [...document.querySelectorAll('#loraRows .lora-name')].filter((s) => s.value).length);
+    [...document.querySelectorAll('#loraRows .lora-row')]
+      .filter((r) => r.dataset.name).length);
 }
 
 function loraValues() {
   return [...document.querySelectorAll('#loraRows .lora-row')]
     .map((r) => ({
-      name: r.querySelector('.lora-name').value,
+      name: r.dataset.name || '',
       strength: Number(r.querySelector('.lora-strength').value),
     }))
     .filter((l) => l.name);

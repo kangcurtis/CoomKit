@@ -55,6 +55,18 @@ assert local["data"]["mode"] == "completion"
 assert local["data"]["thinking_prefill"], "gemma preset should ship a reasoning prefill"
 print("preset wiring OK:", local["name"])
 
+# The hosted preset ships a reasoning prefill too, and that is not decoration:
+# Kimi K3 is the most-used cloud model for this, it takes the prefill through
+# Moonshot's partial mode, and measured against it a hard scene is a flat
+# refusal without one. Every other hosted model ignores the field, because
+# llm.build_payload gates the partial turn on the model id.
+hosted = next(p for p in presets if p["name"].startswith("Hosted API"))
+assert hosted["data"]["thinking_prefill"], \
+    "the hosted preset must ship the reasoning prefill Kimi needs"
+assert hosted["data"]["thinking"], \
+    "partial mode is a reasoning channel — it needs thinking on"
+print("hosted preset ships the Kimi prefill")
+
 # ── 2. inspector fidelity ────────────────────────────────────────
 # Always its own fixture. This used to take chars[0] when the roster was not
 # empty, which on any real install is the user's shipped starter — so the test

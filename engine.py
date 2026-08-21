@@ -1035,6 +1035,21 @@ def assemble_blocks(chat: dict, char: dict, persona, preset: dict,
         messages.insert(0, {"role": "system", "content": ""})
 
     if trace is not None:
+        # Where the CURRENT user turn landed, for the vision inline. Decided
+        # here and not in the server, because depth-0 blocks (a card's
+        # post_history_instructions, cast_turn, an ST-imported injection)
+        # legally render AFTER it — so messages[-1] is a system message for
+        # exactly the cards people import, and a backwards role scan from the
+        # server can land on an imported block that carries role:user. The
+        # history marker is the identity that cannot be faked; example turns
+        # are user-role too but carry marker "examples".
+        trace["last_user_idx"] = next(
+            (i for i in range(len(messages) - 1, -1, -1)
+             if messages[i]["role"] == "user"
+             and ((messages[i].get("src") or {}).get("marker") == "history"
+                  or any(p.get("marker") == "history"
+                         for p in messages[i].get("parts") or []))),
+            None)
         trace["segments"] = [
             {"role": m["role"],
              "parts": m.get("parts")

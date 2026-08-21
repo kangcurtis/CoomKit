@@ -584,8 +584,12 @@
             <label>base url <input id="rbUrl" placeholder="https://openrouter.ai/api/v1"></label>
           </div>
           <label>api key <input id="rbKey" type="password" placeholder="sk-…"></label>
+          <label class="check"><input type="checkbox" id="rbVision"> send images to this backend
+            <span class="lbl-hint">your pictures leave this machine — only for a backend that's really yours</span></label>
           <div class="row-btns"><button class="ghost-btn" id="rbAdd">add backend</button></div>
-          <p class="note">Heads up: remote providers see your text. Vision stays local unless you explicitly pick a remote vision model.</p>
+          <p class="note">Heads up: remote providers see your text. Your pictures stay on this
+            machine unless you tick "send images" on a backend — meant for your own
+            LM Studio on another box, not for a stranger's API.</p>
         </div>
         <div class="block">
           <div class="block-head"><h3>Sync from another CoomKit</h3></div>
@@ -1067,7 +1071,8 @@
         is. She keeps it as her face and as her generation reference.</p>
       <p class="hint warn">The picture never leaves this machine, so this
         needs a <b>local vision model</b> — a remote backend is refused rather
-        than quietly shown nothing.</p>
+        than quietly shown nothing, unless you've ticked "send images" on it
+        in ⚙ → backends because it's really yours.</p>
       <div class="cf-drop" id="cfDrop">
         <input type="file" id="cfFile" accept="image/*" multiple hidden>
         <span>drop a picture here, or <b>click to pick one</b> · up to 4 of the same girl</span>

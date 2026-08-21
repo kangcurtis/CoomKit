@@ -6,6 +6,8 @@ import base64
 import json
 import urllib.request
 
+import testkit
+
 BASE = "http://127.0.0.1:3939"
 PNG = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + b"IHDR" + b"\x00" * 20)  # junk but PNG-ish
 
@@ -41,21 +43,13 @@ def stream_send(body):
     return "".join(text), "".join(think), err
 
 
-rows = call("GET", "/api/characters")["rows"]
-if rows:
-    cid = rows[0]["id"]
-    print("using existing card:", rows[0]["name"])
-else:
-    # minimal synthetic v2 card so the smoke test is self-sufficient
-    synth = {"spec": "chara_card_v2", "data": {
-        "name": "Test-chan", "description": "a bratty test fixture",
-        "first_mes": "ugh, a test? really?"}}
-    cid = call("POST", "/api/cards/import", {
-        "filename": "test.json",
-        "b64": base64.b64encode(json.dumps(synth).encode()).decode()})["id"]
-    print("imported synthetic card")
+# A FIXTURE character, never rows[0]: a smoke test that "uses the existing
+# card" adopts the user's own on any real install and runs its chats over
+# her. testkit.ensure_character makes one if there is none, and the sweep
+# at exit takes it away again.
+cid = testkit.ensure_character()
 chat = call("POST", "/api/chats/new", {"character_id": cid})["chat_id"]
-print("chat", chat)
+print("fixture character:", cid, "chat", chat)
 
 # 1. rail overrides: in-character thinking + reply prefill, no preset at all
 t, th, err = stream_send({

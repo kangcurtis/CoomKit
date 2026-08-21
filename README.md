@@ -78,7 +78,8 @@ static files.
   decides how she looks; the pitches decide who she is. She keeps it as her
   face and as her generation reference. The picture never leaves your machine,
   so this needs a local vision model — a remote backend is refused outright
-  rather than quietly shown nothing and left to invent.
+  rather than quietly shown nothing and left to invent, unless you've ticked
+  **send images** on that backend because it's really yours.
 
 **Scenario forge**
 - Pitches distinct fresh scenarios from the card, your persona, and optionally
@@ -156,9 +157,12 @@ static files.
 
 **Privacy**
 - Everything is local: SQLite, a config file, your assets on disk
-- **Images you upload never go to a remote provider.** If you've selected a
-  hosted model, the picture stays on your machine and the model is told it
-  wasn't sent, rather than being allowed to hallucinate what was in it
+- **Images you upload never go to a remote provider** unless you say so. If
+  you've selected a hosted model, the picture stays on your machine and the
+  model is told it wasn't sent, rather than being allowed to hallucinate what
+  was in it. The one exception is opt-in and per backend: tick **send images**
+  on a backend in ⚙ → backends, for when the "remote" is really your own rig
+  on the other side of the house
 - API keys stay server-side and never reach the browser
 
 ## Backends
@@ -171,6 +175,14 @@ Local backends get the most out of CoomKit — they genuinely continue an
 assistant turn, which makes prefills real rather than advisory. Hosted providers
 mostly strip that; the UI tells you when a control is being emulated instead of
 honoured, so you're never guessing.
+
+**Kimi K3 works out of the box.** It's the cloud model most people here use,
+and it takes a reasoning prefill for real — Moonshot's partial mode seeds its
+thought channel the same way a local model's is seeded, which is the strongest
+steer there is. The shipped **Hosted API** preset carries one, so pick that
+preset with K3 and it behaves. Without it, K3 answers an explicit scene with a
+flat refusal, or with nothing at all. (If you installed CoomKit before this
+landed, ⚙ → library → install refreshes the shipped presets in place.)
 
 ## Getting started
 

@@ -249,11 +249,13 @@ check("a missing backend says so rather than blaming the picture",
       "a blank remote_backends entry normalises to the same empty string as "
       "a blank backend, and used to be reported as 'vision is local-only'")
 
-# The local-only rule. Deterministic wherever a remote is configured, quietly
-# skipped on a bare clone — same pattern as test_regex and test_lore.
+# The local-only rule. Deterministic wherever an UNFLAGGED remote is
+# configured, quietly skipped on a bare clone — same pattern as test_regex
+# and test_lore. A remote the user flagged `vision: true` is deliberately
+# not a refusal any more, so only unflagged entries exercise it.
 cfg = call("GET", "/api/config")
 remote = next((rb["url"] for rb in (cfg.get("remote_backends") or [])
-               if rb.get("url")), "")
+               if rb.get("url") and not rb.get("vision")), "")
 if remote:
     r = call("POST", "/api/forge/characters/from-image",
              {"backend": remote, "model": "x",
@@ -266,7 +268,26 @@ if remote:
     check("and the refusal names the way out",
           "local model" in (r.get("error") or ""))
 else:
-    print("  ..   no remote backend configured — local-only rule not exercised")
+    print("  ..   no unflagged remote configured — local-only rule not exercised")
+
+# A remote flagged `vision: true` passes the gate: the picture really is
+# sent, so the indistinguishable-failure argument no longer applies. The
+# fake endpoint fails at the actual model call — the point is only that it
+# is NOT the local-only refusal. Config restored no matter what; restoring
+# the masked list is loss-free because the config merge keeps stored keys.
+saved_rbs = cfg.get("remote_backends") or []
+try:
+    call("POST", "/api/config", {"remote_backends": saved_rbs + [
+        {"label": "cftf-vision-pin", "url": "http://cftf-pin.invalid/v1",
+         "vision": True}]})
+    r = call("POST", "/api/forge/characters/from-image",
+             {"backend": "http://cftf-pin.invalid/v1", "model": "x",
+              "images": [{"name": "a.png", "b64": b64}]})
+    check("a vision-flagged remote is not refused for being remote",
+          "local-only" not in (r.get("error") or ""),
+          "the user explicitly said this backend may see pictures")
+finally:
+    call("POST", "/api/config", {"remote_backends": saved_rbs})
 
 
 # ── 6. commit: the picture becomes her face AND her reference ────────────

@@ -60,11 +60,36 @@ time.sleep(0.3)
 
 
 def call(path, body, method="POST"):
+    """POST and return the result, whether the route answers JSON or SSE.
+
+    Both approval routes stream now — anything that can 4xx still comes back
+    as JSON before the headers, so the content type is the honest signal of
+    which shape arrived. This test predated that and json.loads()'d an event
+    stream, which fails as "Expecting value: line 1 column 1".
+    """
     req = urllib.request.Request(BASE + path, data=json.dumps(body).encode(),
                                  method=method,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=600) as r:
-        return json.loads(r.read().decode())
+        if "text/event-stream" not in (r.headers.get("Content-Type") or ""):
+            return json.loads(r.read().decode())
+        # The LAST data frame that is not a note/progress tick is the result.
+        out = {}
+        for raw in r:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                frame = json.loads(payload)
+            except ValueError:
+                continue
+            if "note" in frame or "progress" in frame:
+                continue
+            out = frame
+        return out
 
 
 # config: comfy -> mock

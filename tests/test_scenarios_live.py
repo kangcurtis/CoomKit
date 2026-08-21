@@ -5,6 +5,8 @@ import _bootstrap  # noqa: F401  — repo root on sys.path
 import json
 import urllib.request
 
+import testkit
+
 BASE = "http://127.0.0.1:3939"
 OR = "https://openrouter.ai/api/v1"
 MODEL = "moonshotai/kimi-k3"
@@ -21,7 +23,8 @@ def call(method, path, body=None):
         return json.loads(e.read().decode())
 
 
-cid = call("GET", "/api/characters")["rows"][0]["id"]
+# A FIXTURE character, never rows[0] — see test_scenarios.
+cid = testkit.ensure_character()
 
 # suggestions WITH memory (there are user+character facts from the unit test)
 r = call("POST", "/api/scenarios/suggest", {

@@ -46,9 +46,9 @@ check("empty name never matches", not memory._mentions("anything", ""))
 
 # ── 2. persona_known: what the model was already told ────────────────────
 print("\nthe persona is configuration, not a discovery")
-known = memory.persona_known("Eric", "A tall engineer. Drinks too much coffee.")
+known = memory.persona_known("Dave", "A tall engineer. Drinks too much coffee.")
 check("the name becomes a known fact",
-      any("Eric" in k for k in known), str(known))
+      any("Dave" in k for k in known), str(known))
 check("each persona sentence becomes a known fact", len(known) == 3, str(known))
 check("'anon' is not a name worth guarding", memory.persona_known("anon") == [])
 check("nor is an empty persona", memory.persona_known("", "") == [])
@@ -56,17 +56,17 @@ check("nor is an empty persona", memory.persona_known("", "") == [])
 # ── 3. sanitize_facts: drop restatements, demote leaks ───────────────────
 print("\nsanitising what the extractor returns")
 facts = [
-    {"scope": "user", "content": "The user's name is Eric."},
-    {"scope": "user", "content": "The user is called Eric."},
+    {"scope": "user", "content": "The user's name is Dave."},
+    {"scope": "user", "content": "The user is called Dave."},
     {"scope": "user", "content": "The user loves being teased by Mika."},
     {"scope": "user", "content": "The user has a cat named Widget."},
     {"scope": "character", "content": "Mika bit his ear."},
 ]
-out = memory.sanitize_facts(facts, "Eric", "", "Mika")
+out = memory.sanitize_facts(facts, "Dave", "", "Mika")
 contents = [f["content"] for f in out]
 check("a user fact restating the persona name is dropped",
-      "The user's name is Eric." not in contents
-      and "The user is called Eric." not in contents, str(contents))
+      "The user's name is Dave." not in contents
+      and "The user is called Dave." not in contents, str(contents))
 check("a user fact naming the character is demoted to character scope",
       next((f["scope"] for f in out
             if f["content"].startswith("The user loves")), "") == "character")
@@ -76,12 +76,12 @@ check("a genuinely durable user fact survives untouched",
 check("character-scope facts pass through", "Mika bit his ear." in contents)
 check("no persona means nothing to drop",
       len(memory.sanitize_facts(
-          [{"scope": "user", "content": "The user's name is Eric."}],
+          [{"scope": "user", "content": "The user's name is Dave."}],
           "", "", "")) == 1)
 check("a persona-desc restatement is dropped too",
       memory.sanitize_facts(
           [{"scope": "user", "content": "The user is a tall engineer."}],
-          "Eric", "The user is a tall engineer who hates mornings.", "") == [])
+          "Dave", "The user is a tall engineer who hates mornings.", "") == [])
 
 # ── 4. rescope_user_facts: repairing rows written before the guard ───────
 print("\nrepairing old user-scope leaks")
