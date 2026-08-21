@@ -873,6 +873,30 @@ a 5s clip in 183s with LM Studio parked and restored around it):
   install, trying TTS); now it names the packs and nothing is unloaded. A
   failed probe returns None and degrades to the old quoted-rejection path.
 
+**An SSE route must never send `Connection: keep-alive`, and the reason is
+inside http.server.** `send_header("Connection", "keep-alive")` flips
+`self.close_connection` to False on that exact value — so after `[DONE]`
+the handler thread loops into `handle_one_request()` waiting for another
+request on the same socket, and since an SSE body has no Content-Length
+and no chunked framing, the client can never know the body ended. A
+browser fetch never resolves `done` and the UI freezes on the last status
+line. This SHIPPED (2026-08-21): the four studio/tool SSE routes copied
+their header block from the old `/api/chat` route, which carried the
+header; `_chat_send` never did, which is the only reason chat streaming
+always worked. It presented as "the render is done on the rig but the
+remote CoomKit is stuck in the rendering stage" — and looked LAN-related,
+because the reporter's laptop was the first real browser to use the new
+routes at all. Every route now omits the header AND pins
+`close_connection = True` explicitly (so a future `protocol_version =
+"HTTP/1.1"` bump cannot resurrect the bug for 1.1 clients, where
+close_connection defaults False). test_api guards both statically and
+live. The verification lesson is the part worth keeping: every one of my
+"verified live" stream tests used `curl -m <timeout>` or `| head`, read
+the frames from a log, and called it proven — a stream test must use a
+client that WAITS FOR EOF with no safety timeout doing the closing for
+it, because "all frames arrived" and "the response ended" are different
+claims and only the second one is what a browser needs.
+
 **Chrome icons are an inline SVG sprite in index.html** — 28 `<symbol>`s,
 stroke=currentColor, so they follow the colour cascade and the theme for
 free; the colour pictographs they replaced rendered as platform emoji and

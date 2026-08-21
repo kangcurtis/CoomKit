@@ -1328,8 +1328,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
         self.end_headers()
+        # NEVER send "Connection: keep-alive" on an SSE response:
+        # http.server's send_header flips close_connection to False on that
+        # exact value, so after [DONE] the server holds the socket open for
+        # a next request — and a body with no Content-Length and no chunked
+        # framing means the client cannot know it ended. A browser fetch
+        # never resolves and the UI freezes on the last status line, which
+        # presented as "stuck in the rendering stage even though the render
+        # is done". Pinned explicitly so a future protocol_version bump
+        # cannot quietly resurrect it.
+        self.close_connection = True
 
         def send(obj) -> bool:
             try:
@@ -2290,6 +2299,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
+        # This route never sent Connection: keep-alive, which is exactly why
+        # chat streaming always terminated cleanly while the studio SSE
+        # routes hung (see the note on those). Pinned here too so the four
+        # routes cannot drift apart again.
+        self.close_connection = True
 
         def send(obj) -> bool:
             try:
@@ -4661,8 +4675,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
         self.end_headers()
+        # NEVER send "Connection: keep-alive" on an SSE response:
+        # http.server's send_header flips close_connection to False on that
+        # exact value, so after [DONE] the server holds the socket open for
+        # a next request — and a body with no Content-Length and no chunked
+        # framing means the client cannot know it ended. A browser fetch
+        # never resolves and the UI freezes on the last status line, which
+        # presented as "stuck in the rendering stage even though the render
+        # is done". Pinned explicitly so a future protocol_version bump
+        # cannot quietly resurrect it.
+        self.close_connection = True
 
         def send(obj) -> bool:
             try:
@@ -4764,8 +4787,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
         self.end_headers()
+        # NEVER send "Connection: keep-alive" on an SSE response:
+        # http.server's send_header flips close_connection to False on that
+        # exact value, so after [DONE] the server holds the socket open for
+        # a next request — and a body with no Content-Length and no chunked
+        # framing means the client cannot know it ended. A browser fetch
+        # never resolves and the UI freezes on the last status line, which
+        # presented as "stuck in the rendering stage even though the render
+        # is done". Pinned explicitly so a future protocol_version bump
+        # cannot quietly resurrect it.
+        self.close_connection = True
 
         def send(obj) -> bool:
             try:
@@ -5350,8 +5382,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "keep-alive")
         self.end_headers()
+        # NEVER send "Connection: keep-alive" on an SSE response:
+        # http.server's send_header flips close_connection to False on that
+        # exact value, so after [DONE] the server holds the socket open for
+        # a next request — and a body with no Content-Length and no chunked
+        # framing means the client cannot know it ended. A browser fetch
+        # never resolves and the UI freezes on the last status line, which
+        # presented as "stuck in the rendering stage even though the render
+        # is done". Pinned explicitly so a future protocol_version bump
+        # cannot quietly resurrect it.
+        self.close_connection = True
 
         def send(obj) -> bool:
             try:
