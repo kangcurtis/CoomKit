@@ -633,6 +633,47 @@ const CARD_FIELDS = {
   cfCreatorNotes: 'creator_notes',
 };
 
+// One entry per greeting, each collapsed to a one-line preview. The old UI
+// was a single "one per line" textarea — join('\n') on load, split('\n') on
+// save — which shredded every multi-line greeting (they are all multi-line
+// prose) into line-fragments on the first save. Import always parsed the
+// array correctly; the editor was the thing destroying it.
+function altGreetingRow(text, open = false) {
+  const d = document.createElement('details');
+  d.className = 'cf-alt';
+  d.open = open;
+  const sum = document.createElement('summary');
+  const ta = document.createElement('textarea');
+  ta.rows = 5;
+  ta.value = text || '';
+  const row = document.createElement('div');
+  row.className = 'row-btns';
+  const rm = document.createElement('button');
+  rm.type = 'button';
+  rm.className = 'mini-btn';
+  rm.textContent = '✕ remove this greeting';
+  rm.onclick = () => { d.remove(); syncAltCount(); };
+  row.appendChild(rm);
+  const preview = () => {
+    const first = (ta.value.trim().split('\n')[0] || '').slice(0, 64);
+    sum.textContent = first || '(empty greeting)';
+  };
+  ta.oninput = preview;
+  preview();
+  d.append(sum, ta, row);
+  return d;
+}
+function syncAltCount() {
+  const n = document.querySelectorAll('#cfAltList .cf-alt').length;
+  $('cfAltCount').textContent = n ? `${n} of them` : 'none yet';
+}
+$('cfAltAdd').onclick = () => {
+  const d = altGreetingRow('', true);
+  $('cfAltList').appendChild(d);
+  syncAltCount();
+  d.querySelector('textarea').focus();
+};
+
 function openCardEditor(charId) {
   const c = S.chars.find((x) => x.id === charId);
   if (!c) return;
@@ -641,7 +682,17 @@ function openCardEditor(charId) {
   $('cardEditWho').textContent = c.name;
   $('cardEditSpec').textContent = c.data.spec || 'v2';
   for (const [id, key] of Object.entries(CARD_FIELDS)) $(id).value = f[key] || '';
-  $('cfAltGreetings').value = (f.alternate_greetings || []).join('\n');
+  const alts = f.alternate_greetings || [];
+  $('cfAltList').innerHTML = '';
+  for (const g of alts) $('cfAltList').appendChild(altGreetingRow(g));
+  syncAltCount();
+  // Empty fields fold to their one-line summary; filled ones open. The
+  // greetings fold opens on count, since its content is not one textarea.
+  document.querySelectorAll('#cardEditor .cf-fold').forEach((d) => {
+    const t = d.querySelector('textarea');
+    d.open = d.id === 'cfAltFold' ? alts.length > 0
+      : !!(t && t.value.trim());
+  });
   $('cardNote').textContent = '';
   $('cardNote').className = 'note';
   fillLooksAndVoice(c);
@@ -662,8 +713,9 @@ $('cardSave').onclick = async () => {
     $('cardNote').className = 'note bad';
     return;
   }
-  fields.alternate_greetings = $('cfAltGreetings').value
-    .split('\n').map((s) => s.trim()).filter(Boolean);
+  fields.alternate_greetings = [
+    ...document.querySelectorAll('#cfAltList textarea')]
+    .map((t) => t.value.trim()).filter(Boolean);
   const r = await post(`/api/characters/${id}/fields`, { fields });
   if (r.error) {
     $('cardNote').textContent = 'failed: ' + r.error;

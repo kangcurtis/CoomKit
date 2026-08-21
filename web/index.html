@@ -873,19 +873,38 @@
           </div>
           <input type="hidden" id="cardEditId">
           <label>name <input id="cfName"></label>
-          <label>description <span class="lbl-hint">who she is, the bulk of the prompt</span>
-            <textarea id="cfDescription" rows="7"></textarea></label>
-          <label>personality <textarea id="cfPersonality" rows="3"></textarea></label>
-          <label>scenario <span class="lbl-hint">a forged scenario replaces this one</span>
-            <textarea id="cfScenario" rows="3"></textarea></label>
-          <label>first message <textarea id="cfFirstMes" rows="5"></textarea></label>
-          <label>example dialogue <textarea id="cfMesExample" rows="5"></textarea></label>
-          <label>alternate greetings <span class="lbl-hint">one per line</span>
-            <textarea id="cfAltGreetings" rows="4"></textarea></label>
-          <label>system prompt override <span class="lbl-hint">card-level, usually empty</span>
-            <textarea id="cfSystemPrompt" rows="3"></textarea></label>
-          <label>post-history instructions <textarea id="cfPostHistory" rows="3"></textarea></label>
-          <label>creator notes <textarea id="cfCreatorNotes" rows="2"></textarea></label>
+          <!-- Every optional field folds to one line while empty — the
+               editor was a wall of blank textareas for fields most cards
+               never use. openCardEditor opens the ones that have text. -->
+          <details class="cf-fold">
+            <summary>description <span class="lbl-hint">who she is, the bulk of the prompt</span></summary>
+            <textarea id="cfDescription" rows="7"></textarea></details>
+          <details class="cf-fold">
+            <summary>personality</summary>
+            <textarea id="cfPersonality" rows="3"></textarea></details>
+          <details class="cf-fold">
+            <summary>scenario <span class="lbl-hint">a forged scenario replaces this one</span></summary>
+            <textarea id="cfScenario" rows="3"></textarea></details>
+          <details class="cf-fold">
+            <summary>first message</summary>
+            <textarea id="cfFirstMes" rows="5"></textarea></details>
+          <details class="cf-fold">
+            <summary>example dialogue</summary>
+            <textarea id="cfMesExample" rows="5"></textarea></details>
+          <details class="cf-fold" id="cfAltFold">
+            <summary>alternate greetings <span class="lbl-hint" id="cfAltCount"></span></summary>
+            <div id="cfAltList"></div>
+            <button class="mini-btn" id="cfAltAdd" type="button">+ add another greeting</button>
+          </details>
+          <details class="cf-fold">
+            <summary>system prompt override <span class="lbl-hint">card-level, usually empty</span></summary>
+            <textarea id="cfSystemPrompt" rows="3"></textarea></details>
+          <details class="cf-fold">
+            <summary>post-history instructions</summary>
+            <textarea id="cfPostHistory" rows="3"></textarea></details>
+          <details class="cf-fold">
+            <summary>creator notes</summary>
+            <textarea id="cfCreatorNotes" rows="2"></textarea></details>
           <div class="row-btns">
             <button class="primary-btn" id="cardSave">save card</button>
           </div>
