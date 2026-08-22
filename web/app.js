@@ -4188,6 +4188,47 @@ $('cvVoiceClear').onclick = async () => {
   fillLooksAndVoice(charOf(id));
 };
 
+// Capture a reference straight out of a video. The server streams, because
+// yt-dlp takes tens of seconds and a button that goes quiet for that long is
+// indistinguishable from a broken one — same reason the studio routes stream.
+function voiceNote(text, cls) {
+  $('cvVoiceNote').textContent = text;
+  $('cvVoiceNote').className = 'note' + (cls ? ' ' + cls : '');
+}
+$('cvVoiceGrab').onclick = async () => {
+  const id = $('cardEditId').value;
+  const url = $('cvVoiceUrl').value.trim();
+  if (!url) { voiceNote('paste a link first', 'bad'); return; }
+  const btn = $('cvVoiceGrab');
+  btn.disabled = true;                    // one capture at a time
+  voiceNote('starting…');
+  let r;
+  try {
+    r = await studioStream(`/api/characters/${id}/voice-capture`, {
+      url,
+      start: $('cvVoiceStart').value.trim() || '0',
+      end: $('cvVoiceEnd').value.trim(),
+    }, (note) => voiceNote(note));
+  } catch (e) {
+    voiceNote('failed: ' + e, 'bad');
+    btn.disabled = false;
+    return;
+  }
+  btn.disabled = false;
+  // A clip that failed the checks is NOT saved, so the notes are the whole
+  // answer — say what was wrong with it rather than just "failed".
+  if (!r || r.error) {
+    voiceNote([r && r.error, ...((r && r.notes) || [])]
+      .filter(Boolean).join(' — '), 'bad');
+    return;
+  }
+  await loadChars();
+  fillLooksAndVoice(charOf(id));
+  $('cvVoicePreset').value = '__own';
+  syncVoicePreview();
+  voiceNote((r.notes || ['captured']).join(' '), 'ok');
+};
+
 $('cvRefPick').onclick = () => $('cvRefFile').click();
 $('cvRefFile').onchange = async (ev) => {
   const f = ev.target.files[0];

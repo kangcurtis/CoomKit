@@ -121,13 +121,18 @@ static files.
 **Voice**
 - Clone her from a 3–15 second clip, or use one of the bundled references, or
   describe the voice in words — OmniVoice and IndexTTS-2 both synthesise one.
-- `./voiceclip.py` grabs that clip out of a video — a URL or a local file —
-  and, more usefully, **checks it before you trust it**. A reference under
-  ~180 Hz can clone an octave down and come back male, and nothing in the
-  pipeline tells you: you find out after a render and blame the model. It
-  measures the pitch, the spread, the length and the levels, refuses the clip
-  if it will not work, and can install it straight onto a character. Needs
-  `yt-dlp` and `ffmpeg` on PATH for the capture; `--inspect` needs neither.
+- **Capture one from a video without leaving the card editor** — paste a link
+  and the seconds you want under *her voice*, and it grabs just that span.
+  More usefully, it **checks the clip before keeping it**: a reference under
+  ~185 Hz can clone an octave down and come back male, and nothing in the
+  pipeline tells you, so you find out after a render and blame the model. It
+  measures the pitch and its spread, the length and the levels, refuses a
+  clip that will not work rather than quietly saving it, and installs one
+  that will. Needs `yt-dlp` and `ffmpeg` on the machine running CoomKit.
+- The same thing from a terminal, including for a file you already have:
+  `./voiceclip.py <url|file> 1:30 1:42 -o rin.wav`, `--inspect` to measure a
+  clip you already trust, `--check-shipped` to re-derive the bundled
+  references' pitches from the audio. `--inspect` needs neither tool.
 - "Say it out loud" speaks the dialogue from her last reply and nothing else,
   so she doesn't read her own stage directions aloud.
 - Preview whatever you picked before you commit to it.

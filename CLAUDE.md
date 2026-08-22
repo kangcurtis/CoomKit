@@ -1631,6 +1631,53 @@ a reroll every time.
   provenance of those numbers is not known, and silently editing somebody
   else's measurements to agree with a new tool is how a record stops being
   one. `./voiceclip.py --check-shipped` re-derives them on demand.
+
+  **It is in the CARD EDITOR too** — `POST /api/characters/<id>/voice-capture
+  {url, start, end}`, SSE, under "Capture it from a video" in the voice
+  block. Shipping only a CLI was the wrong half: the person who wants a
+  character to sound like a specific voice is in the editor looking at her
+  card, not in a terminal. The route is the same `voiceclip` functions the
+  CLI calls — no second capture path — and everything that can 4xx is decided
+  before the stream headers, so the content type stays an honest signal of
+  which shape arrived. It streams for the ordinary reason: yt-dlp takes tens
+  of seconds and a silent button is indistinguishable from a broken one.
+
+  Three things the route has to get right, all verified live:
+
+  - **`check_url` runs BEFORE anything is fetched, and the reason is not
+    theoretical.** `capture()` decides "URL" by `"://" in source` and treats
+    anything else as a LOCAL PATH — so a route forwarding the field
+    unguarded turns `/etc/passwd` into a WAV and serves it back from
+    `/api/avatars/`, on an install `"host": "0.0.0.0"` may have put on the
+    LAN. The allowlist lives in `voiceclip` rather than at the route so the
+    CLI and the route cannot disagree about it.
+  - **A blank or open-ended `end` is refused**, because `hhmmss(inf)` renders
+    the literal string `inf` into the yt-dlp section argument, and a span
+    over `MAX_CAPTURE_SECONDS` (120) is refused as well — that is somebody
+    asking the server to download a film, which is a different question from
+    what makes a good reference.
+  - **A clip that fails the checks is NOT stored.** The whole point is the
+    verdict; writing the file anyway and mentioning the problem in passing
+    would leave a reference on her card that clones badly.
+
+  **`--download-sections` can silently under-deliver, and the fix is to
+  check.** It needs an extractor that reports duration and can seek. Pointed
+  at a plain `http://…/x.flac` (the generic extractor) it does not fail — it
+  exits 0 and writes a 0.0-second clip; on a second run of the identical
+  request it wrote 5.24s of the 9 asked for. So `capture()` measures what it
+  got and falls back to fetching the audio whole and cutting with ffmpeg,
+  saying so in a note. The threshold is **90%, not 50%**: a partial cut is
+  the same silent wrongness as an empty one, and 5.24s is a usable length
+  with a passing verdict that is simply not the audio the user chose.
+
+  **Open, and not defended against: a public URL that redirects to a private
+  address.** Checking the host the user typed does not close it — yt-dlp
+  follows redirects itself and stdlib gives no hook in between. The exposure
+  is bounded (the response has to survive ffmpeg and then read as speech, and
+  only audio comes back) and the feature's whole purpose is fetching
+  user-supplied URLs, so this is recorded rather than half-fixed. Anyone
+  putting CoomKit on a network with something sensitive on localhost should
+  know it.
 - **ComfyUI says exactly what is wrong and we used to throw it away.** A
   rejected graph 400s with a body naming the node, field and value;
   `comfy._explain_rejection` quotes it. A job that *errors* never produces

@@ -1022,6 +1022,25 @@
               <input id="cvVoiceInstruct" placeholder="female, young adult, moderate pitch"></label>
             <p class="note" id="cvVoiceCredit"></p>
             <audio id="cvVoicePreview" controls class="voice-preview" hidden></audio>
+            <div class="mini-block">
+              <div class="block-head"><h4>Capture it from a video</h4></div>
+              <p class="hint">Paste a link and the seconds you want. It grabs
+                just that span, then <b>checks it before keeping it</b> — a
+                reference under 185 Hz can clone an octave down and come back
+                male, and nothing downstream tells you. Needs
+                <code>yt-dlp</code> and <code>ffmpeg</code> on the machine
+                running CoomKit.</p>
+              <label>link <input id="cvVoiceUrl" placeholder="https://…"></label>
+              <div class="grid2">
+                <label>from <span class="lbl-hint">1:30</span>
+                  <input id="cvVoiceStart" placeholder="0:00"></label>
+                <label>to <span class="lbl-hint">1:42</span>
+                  <input id="cvVoiceEnd" placeholder="0:10"></label>
+              </div>
+              <div class="row-btns">
+                <button class="ghost-btn" id="cvVoiceGrab">capture</button>
+              </div>
+            </div>
             <div class="row-btns">
               <button class="ghost-btn" id="cvVoicePick">upload a clip…</button>
               <button class="ghost-btn danger-btn" id="cvVoiceClear">use a shipped voice</button>

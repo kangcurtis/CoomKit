@@ -79,8 +79,36 @@ F0_MIN_HZ = 70.0
 F0_MAX_HZ = 520.0
 
 
+# Only these reach yt-dlp. It happily takes `file://`, a local path, or a
+# playlist page, and this module is reachable from an HTTP route on a server
+# the user may have deliberately put on their LAN — so the scheme is an
+# allowlist rather than a denylist, and the check lives HERE rather than at
+# the route, so the CLI and the route cannot disagree about it.
+URL_SCHEMES = ("http", "https")
+
+# Nothing here should run for minutes. A section download is seconds; a
+# conversion is faster. Without a timeout a wedged child holds the request
+# thread of a single-threaded-per-request server forever.
+FETCH_TIMEOUT = 300
+CONVERT_TIMEOUT = 120
+
+
 class MissingTool(RuntimeError):
     """An external binary is not installed. Carries the sentence to print."""
+
+
+def check_url(url: str) -> str:
+    """The URL, or ValueError saying why not."""
+    import urllib.parse
+
+    parsed = urllib.parse.urlparse((url or "").strip())
+    if parsed.scheme.lower() not in URL_SCHEMES:
+        raise ValueError(
+            f"only {' and '.join(URL_SCHEMES)} links are accepted"
+            + (f", not {parsed.scheme}:" if parsed.scheme else ""))
+    if not parsed.netloc:
+        raise ValueError("that does not look like a link")
+    return url.strip()
 
 
 # ── time parsing ─────────────────────────────────────────────────────────
@@ -399,11 +427,21 @@ def _need(tool: str) -> str:
     return found
 
 
-def _run(cmd: list[str], quiet: bool) -> None:
-    proc = subprocess.run(
-        cmd,
-        stdout=subprocess.DEVNULL if quiet else None,
-        stderr=subprocess.PIPE if quiet else None)
+def _run(cmd: list[str], quiet: bool, timeout: int = CONVERT_TIMEOUT) -> None:
+    # No shell, ever: the URL and the paths are argv elements, so nothing in
+    # them can be a second command. `timeout` is the other half — a child
+    # that never exits would otherwise hold the calling thread forever, which
+    # on the server means one request wedges a worker.
+    try:
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL if quiet else None,
+            stderr=subprocess.PIPE if quiet else None,
+            timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"{Path(cmd[0]).name} gave up after {timeout}s — a long source, a "
+            f"slow link, or a video it cannot seek in") from None
     if proc.returncode != 0:
         tail = (proc.stderr or b"").decode("utf-8", "replace").strip()
         tail = tail.splitlines()[-1] if tail else f"exit {proc.returncode}"
@@ -418,6 +456,7 @@ def fetch_section(url: str, start: float, end: float, dest: Path,
     reference does not cost a two-hour download.
     """
     yt = _need("yt-dlp")
+    url = check_url(url)
     section = f"*{hhmmss(start)}-{hhmmss(end)}"
     template = str(dest.with_suffix("")) + ".%(ext)s"
     cmd = [yt, "--download-sections", section, "--force-keyframes-at-cuts",
@@ -425,8 +464,27 @@ def fetch_section(url: str, start: float, end: float, dest: Path,
            "--no-playlist", "-o", template]
     if quiet:
         cmd.append("--quiet")
-    cmd.append(url)
-    _run(cmd, quiet)
+    # `--` first: a link that begins with a dash would otherwise be read as a
+    # flag, and yt-dlp has flags that write files.
+    cmd += ["--", url]
+    _run(cmd, quiet, timeout=FETCH_TIMEOUT)
+    got = sorted(dest.parent.glob(dest.stem + ".*"))
+    if not got:
+        raise RuntimeError("yt-dlp reported success but wrote no file")
+    return got[0]
+
+
+def fetch_whole(url: str, dest: Path, quiet: bool = False) -> Path:
+    """The whole audio track, for a source that cannot be section-cut."""
+    yt = _need("yt-dlp")
+    url = check_url(url)
+    template = str(dest.with_suffix("")) + ".%(ext)s"
+    cmd = [yt, "--extract-audio", "--audio-format", "wav",
+           "--audio-quality", "0", "--no-playlist", "-o", template]
+    if quiet:
+        cmd.append("--quiet")
+    cmd += ["--", url]
+    _run(cmd, quiet, timeout=FETCH_TIMEOUT)
     got = sorted(dest.parent.glob(dest.stem + ".*"))
     if not got:
         raise RuntimeError("yt-dlp reported success but wrote no file")
@@ -457,18 +515,52 @@ def normalise(src: Path, dest: Path, start: float = 0.0,
     return dest
 
 
+def _duration(path: Path) -> float:
+    try:
+        with wave.open(str(path)) as w:
+            return w.getnframes() / (w.getframerate() or 1)
+    except Exception:                                 # noqa: BLE001
+        return 0.0
+
+
 def capture(source: str, start: float, end: float, dest: Path,
-            quiet: bool = False) -> Path:
-    """URL or local file in, a checked-shape WAV out."""
+            quiet: bool = False, on_note=None) -> Path:
+    """URL or local file in, a checked-shape WAV out.
+
+    Section-downloading is tried first and is the whole point — it fetches
+    only the seconds asked for, so a twelve-second reference does not cost a
+    two-hour download. But `--download-sections` needs an extractor that can
+    report duration and seek, and on a source that cannot (a direct link to a
+    media file, handled by the generic extractor) it does not fail: it
+    succeeds and writes essentially nothing. Measured, pointing this at a
+    plain `http://…/x.flac`: yt-dlp exited 0 and produced a 0.0-second clip.
+
+    So the span is CHECKED, and a miss falls back to fetching the audio and
+    letting ffmpeg do the cut. That costs a full download, which is why it is
+    the fallback and not the default.
+    """
     dest = Path(dest).with_suffix(".wav")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    is_url = "://" in source
+    want = end - start if end != math.inf else math.inf
     with tempfile.TemporaryDirectory() as tmp:
-        if is_url:
+        if "://" in source:
             raw = fetch_section(url=source, start=start, end=end,
                                 dest=Path(tmp) / "grab", quiet=quiet)
-            # yt-dlp already cut the span, so ffmpeg only reshapes it.
-            return normalise(raw, dest, quiet=quiet)
+            out = normalise(raw, dest, quiet=quiet)
+            got = _duration(out)
+            # 90%, not 50%. A partial cut is the same silent wrongness as an
+            # empty one, just harder to notice: pointing this at a direct
+            # `.flac` link asked for 9 seconds and got 5.24 — a usable length,
+            # a passing verdict, and not the audio the user chose. The only
+            # honest readings are "what was asked for" or "fall back".
+            if want == math.inf or got >= want * 0.9:
+                return out
+            if on_note:
+                on_note(f"that source cannot be cut server-side "
+                        f"({got:.1f}s of {want:.0f}s) — fetching it whole")
+            whole = fetch_whole(url=source, dest=Path(tmp) / "whole",
+                                quiet=quiet)
+            return normalise(whole, dest, start=start, end=end, quiet=quiet)
         src = Path(source).expanduser()
         if not src.exists():
             raise FileNotFoundError(f"no such file: {src}")

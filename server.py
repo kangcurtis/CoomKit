@@ -11,8 +11,10 @@ import json
 import os
 import random
 import re
+import shutil
 import sqlite3
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -41,6 +43,7 @@ import stimport  # noqa: E402
 import studio  # noqa: E402
 import tags  # noqa: E402
 import tools  # noqa: E402
+import voiceclip  # noqa: E402
 import voices as voices_mod  # noqa: E402
 import vram  # noqa: E402
 import wfpack  # noqa: E402
@@ -1177,6 +1180,9 @@ class Handler(BaseHTTPRequestHandler):
         elif (len(parts) == 4 and parts[:2] == ["api", "characters"]
               and parts[2].isdigit() and parts[3] == "avatar"):
             self._character_avatar(int(parts[2]))
+        elif (len(parts) == 4 and parts[:2] == ["api", "characters"]
+              and parts[2].isdigit() and parts[3] == "voice-capture"):
+            self._character_voice_capture(int(parts[2]))
         elif url.path == "/api/forge/characters/create":
             self._chargen_create()
         elif url.path == "/api/scenarios/suggest":
@@ -4399,6 +4405,121 @@ class Handler(BaseHTTPRequestHandler):
                                    "data": row.get("data") or {}}, char_id)
         self._json({"ok": True, "avatar": a["path"],
                     "url": "/api/avatars/" + a["path"]})
+
+    # A span longer than this is never a clone reference — it is somebody
+    # asking the server to download a film. The verdict already says anything
+    # past 15s buys nothing; this is the outer limit on what will be FETCHED,
+    # which is a different question and belongs on the route rather than in
+    # the CLI (a local user running yt-dlp themselves needs no permission
+    # from us).
+    MAX_CAPTURE_SECONDS = 120
+
+    def _character_voice_capture(self, char_id: int) -> None:
+        """POST /api/characters/<id>/voice-capture {url, start, end} — SSE.
+
+        The UI half of `voiceclip.py`: pull a span out of a video, check it
+        against the cloning rules, and install it as her voice sample if it
+        passes. Streams because yt-dlp takes tens of seconds and a blocking
+        POST behind a static "capturing…" is indistinguishable from a hang —
+        the same lesson the studio routes learned.
+
+        Everything that can 4xx is decided BEFORE the stream headers, so the
+        content type is an honest signal of which shape the client got.
+        """
+        body = self._body()
+        row = rows_get("characters", char_id)
+        if not row:
+            self._json({"error": "character not found"}, 404)
+            return
+        try:
+            url = voiceclip.check_url(body.get("url", ""))
+            start = voiceclip.parse_timestamp(body.get("start", "0"))
+            end = voiceclip.parse_timestamp(body.get("end", ""))
+        except ValueError as exc:
+            self._json({"error": str(exc)}, 400)
+            return
+        if end == float("inf"):
+            self._json({"error": "give an end time — a whole video is not a "
+                                 "voice reference"}, 400)
+            return
+        if end <= start:
+            self._json({"error": "the end has to come after the start"}, 400)
+            return
+        if end - start > self.MAX_CAPTURE_SECONDS:
+            self._json({"error": f"that is {int(end - start)}s; keep it under "
+                                 f"{self.MAX_CAPTURE_SECONDS}s. Cloning uses "
+                                 f"3-15."}, 400)
+            return
+        if not shutil.which("yt-dlp") or not shutil.which("ffmpeg"):
+            missing = [t for t in ("yt-dlp", "ffmpeg") if not shutil.which(t)]
+            self._json({"error": f"{' and '.join(missing)} not installed on "
+                                 f"the machine running CoomKit — capturing "
+                                 f"from a link needs {'them' if len(missing) > 1 else 'it'}. "
+                                 f"You can still upload a clip."}, 400)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        # Never "Connection: keep-alive" on SSE — see _studio_approve for the
+        # whole story. Pinned so a protocol_version bump cannot resurrect it.
+        self.close_connection = True
+
+        def send(obj) -> bool:
+            try:
+                self.wfile.write(f"data: {json.dumps(obj)}\n\n".encode())
+                self.wfile.flush()
+                return True
+            except (BrokenPipeError, ConnectionResetError):
+                return False
+
+        def done(obj) -> None:
+            send(obj)
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+        send({"note": f"fetching {int(end - start)}s…"})
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                wav = voiceclip.capture(
+                    url, start, end, Path(tmp) / "capture.wav", quiet=True,
+                    on_note=lambda n: send({"note": n}))
+                send({"note": "checking it…"})
+                report = voiceclip.inspect_wav(wav)
+                ok, notes = voiceclip.verdict(report)
+                if not ok:
+                    # Not stored. A reference that fails is not a file you
+                    # want quietly sitting on the card being cloned from.
+                    done({"ok": False, "report": report, "notes": notes,
+                          "error": "that clip will not clone well"})
+                    return
+                raw = wav.read_bytes()
+                fname = _store_upload(raw, "voice.wav")
+        except voiceclip.MissingTool as exc:
+            done({"error": str(exc)})
+            return
+        except ValueError as exc:
+            done({"error": str(exc)})
+            return
+        except Exception as exc:                       # noqa: BLE001
+            done({"error": str(exc)})
+            return
+
+        # The same write the upload route makes, on the same key.
+        data = row.get("data") or {}
+        voice = dict(data.get("voice") or {})
+        voice["sample"] = fname
+        if body.get("ref_text"):
+            voice["ref_text"] = body["ref_text"]
+        data["voice"] = voice
+        rows_upsert("characters", {"name": row["name"], "data": data,
+                                   "avatar": row.get("avatar") or ""}, char_id)
+        # /api/avatars serves out of data/assets and is what the editor's
+        # audio player already points at for an uploaded sample. Same URL
+        # shape, so the preview works without a second serving route.
+        done({"ok": True, "file": fname, "report": report, "notes": notes,
+              "url": f"/api/avatars/{fname}"})
 
     # Image recipes a portrait re-roll may use. Audio and video are excluded:
     # an avatar is a still, and offering "ASMR" in a portrait picker is noise.

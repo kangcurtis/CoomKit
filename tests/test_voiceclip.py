@@ -25,6 +25,7 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401  — repo root on sys.path
 
+import testkit  # registers the fixture sweep at exit
 import voiceclip
 
 FAILED = []
@@ -219,6 +220,71 @@ samples, rate, full = voiceclip.read_wav(tmp / "eight.wav")
 check("8-bit WAV is read as UNSIGNED, so it is not a wall of noise",
       max(abs(s) for s in samples) > 1000
       and abs(sum(samples) / len(samples)) < 2000, max(abs(s) for s in samples))
+
+# ── 6. the URL allowlist ─────────────────────────────────────────────────
+# This module is reachable from an HTTP route on a server the user may have
+# deliberately put on their LAN, and yt-dlp will happily take file:// or a
+# local path. So the scheme is an allowlist, and it lives in the module so
+# the CLI and the route cannot disagree about it.
+print("\nwhich links are allowed near yt-dlp")
+for good in ("https://example.com/watch?v=x", "http://example.com/a.mp4"):
+    try:
+        voiceclip.check_url(good)
+        check(f"{good.split('://')[0]}:// is accepted", True)
+    except ValueError as exc:
+        check(f"{good} is accepted", False, str(exc))
+for bad in ("file:///etc/passwd", "/etc/passwd", "ftp://x/y", "", "not a link",
+            "javascript:alert(1)"):
+    try:
+        voiceclip.check_url(bad)
+        check(f"{bad!r} is refused", False, "it was accepted")
+    except ValueError:
+        check(f"{bad!r} is refused", True)
+
+# ── 7. the route's guards, before anything is fetched ────────────────────
+# Free and offline: every one of these is answered from the request alone, as
+# JSON with a 4xx, BEFORE the stream headers — so the content type stays an
+# honest signal of which shape the client got.
+print("\nthe capture route refuses what it should, without fetching")
+import json as _json  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+
+BASE = "http://127.0.0.1:3939"
+
+
+def route(body, char_id=None):
+    if char_id is None:
+        char_id = testkit.ensure_character()
+    req = urllib.request.Request(
+        f"{BASE}/api/characters/{char_id}/voice-capture",
+        data=_json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, r.headers.get("Content-Type"), r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type"), e.read().decode()
+
+
+status, ctype, payload = route(
+    {"url": "file:///etc/passwd", "start": "0", "end": "5"})
+check("a file:// link is refused", status == 400 and "http" in payload, payload)
+check("...as JSON, not as a stream", "json" in (ctype or ""), ctype)
+
+status, _c, payload = route({"url": "https://e.com/v", "start": "30", "end": "10"})
+check("an end before the start is refused", status == 400, payload)
+
+status, _c, payload = route({"url": "https://e.com/v", "start": "0", "end": "9:00"})
+check("a span longer than the cap is refused before any download",
+      status == 400 and "under" in payload, payload)
+
+status, _c, payload = route({"url": "https://e.com/v", "start": "x", "end": "10"})
+check("an unreadable timestamp is refused", status == 400, payload)
+
+status, _c, payload = route({"url": "https://e.com/v", "start": "0", "end": "5"},
+                            char_id=99999999)
+check("an unknown character is a 404", status == 404, payload)
 
 print()
 if FAILED:
