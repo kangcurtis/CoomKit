@@ -1578,6 +1578,55 @@ a reroll every time.
   run. Everything expressive has to live in the text and the non-verbal tags.
   Full list in `skills/voice.md`; `studio.review()` catches it before the
   render.
+- **The non-verbal tags are NOT special tokens, and one of them is broken.**
+  Checked against the shipped OmniVoice tokenizer: 33 added tokens, not one a
+  bracketed tag, and no tag is a single vocab entry either. They are ordinary
+  text the model was TRAINED to perform — which is the whole explanation for
+  "some tags get read out and others don't". A tag it does not know is not
+  ignored, it is pronounced, so an invented `[moan]`/`[gasp]`/`[kiss]` puts
+  that word in her mouth mid-line. The node's own `NON_VERBAL_TAGS` and
+  `VOICE_ATTRIBUTES` constants are defined and **never referenced** — nothing
+  in the node or the model validates either one.
+
+  Measured by rendering one tag per take at a fixed seed and transcribing the
+  result back with Whisper: `[sigh]`, `[laughter]` and `[surprise-ah]` are
+  breath with no words; `[confirmation-en]` is "mmm", `[dissatisfaction-hnn]`
+  is "hmph", and the `[question-*]`/`[surprise-*]` sets are the vowel
+  ("ah?", "oh?", "hey?", "wah!", "yo!"). **`[sniff]` is pronounced as the
+  English word — 5 renders, 5 seeds, 5 times, while `[sigh]` performed
+  correctly in all 5.** Deterministic, so a reroll cannot save it. It was in
+  CoomKit's own recommended list AND named in the ASMR brief, which is how it
+  reached users. `studio.BROKEN_TAGS` warns for it by name and the unknown-tag
+  check catches everything invented; `skills/voice.md` carries the sound
+  table. Two tags were missing from the dialect entirely (`[question-ei]`,
+  `[question-yi]`).
+
+  **Open, and not resolved here: `VOICE_VOCAB` diverges from the node's own
+  reference list.** The node says age `young`, pitch `medium`, and accents
+  american/british/australian/canadian/indian/irish/scottish/south-african;
+  CoomKit permits `teenager`, `young adult`, `moderate pitch`, and
+  japanese/korean/portuguese/russian/chinese accents — and every shipped
+  voice preset's `instruct` uses `young adult`/`moderate pitch`. Since
+  nothing validates, an off-list value is not rejected, it simply steers
+  nothing. Deliberately NOT changed: which strings the model actually
+  understands is unmeasured, and rewriting the shipped presets on a
+  code-reading would be swapping one guess for another. Note also that
+  CLAUDE.md's older claim that an unlisted value is "rejected and the job
+  dies" is not supported by this node's source — whatever killed that first
+  ASMR run, it was not validation.
+
+- **Speed is a per-render lever, and a voice take can be re-rolled at a new
+  one** (2026-08-22). `speed` was always a slot on the three OmniVoice graphs
+  and `plan()` always set it from her `data.voice.speed`; what was missing was
+  changing it *after* hearing the take. `/api/studio/remake` accepts `speed`
+  beside `seed`, clamped to the node's own 0.5-2.0 (that path does not call
+  `review()`, so nothing else would catch an out-of-range value), and the
+  gallery payload carries `speed` **only when the resolved workflow actually
+  declares the slot** — IndexTTS-2 (`voice-emotion`) and the music graph do
+  not have one, and a control that silently does nothing is worse than no
+  control. Measured on one line at seed 777: 5.06s at 1.0, 5.81s at 0.85,
+  4.62s at 1.10.
+
 - **Reused upload filenames serve stale audio.** ComfyUI keeps the existing
   file and OmniVoice caches the reference embedding against the name, so
   replacing a voice sample changes nothing. Measured: the same clip cloned to

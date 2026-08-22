@@ -3470,10 +3470,46 @@ async function remakeAsset(a, strip) {
   if (a.seed != null) {
     body.querySelector('.rm-note').textContent = `stored seed: ${a.seed}`;
   }
+  // Pace, on the graphs that actually have the slot — the server sends
+  // `speed` only for those, so this control cannot appear where it would do
+  // nothing. Built as elements: dynamic ids are invisible to test_frontend.
+  let speedSel = null;
+  if (a.speed != null) {
+    // The catalogue is loaded at boot, but this dialog opens from a chat's
+    // inline gallery — a path that never needs the studio pane, and one the
+    // user can reach before boot has finished. Without this the picker
+    // renders with a single option (the speed it already has), which is a
+    // control that cannot change anything. Same on-demand recovery
+    // pickModel() does when the backend list is empty.
+    if (!(S.studio && (S.studio.speeds || []).length)) await loadStudio();
+    const lab = document.createElement('label');
+    lab.textContent = 'speaking speed ';
+    speedSel = document.createElement('select');
+    speedSel.className = 'rm-speed';
+    const cur = Number(a.speed) || 1;
+    const opts = ((S.studio && S.studio.speeds) || []).slice();
+    if (!opts.some(([v]) => Number(v) === cur)) opts.push([cur, 'as rendered']);
+    opts.sort((x, y) => x[0] - y[0]);
+    for (const [v, text] of opts) {
+      const o = document.createElement('option');
+      o.value = String(v);
+      o.textContent = `${Number(v).toFixed(2)} · ${text}`;
+      if (Number(v) === cur) o.selected = true;
+      speedSel.appendChild(o);
+    }
+    lab.appendChild(speedSel);
+    const hint = document.createElement('span');
+    hint.className = 'lbl-hint';
+    hint.textContent = ' a clone copies its reference\u2019s pace; this nudges it';
+    lab.appendChild(hint);
+    // Above the seed radios: it is the lever you reach for after listening.
+    body.insertBefore(lab, body.querySelector('label.check'));
+  }
   const go = await dialog({ title: 'Make it again', body, ok: 'make it' });
   if (!go) return;
   const prompt = body.querySelector('.rm-prompt').value;
   const seed = (body.querySelector('input[name=rmseed]:checked') || {}).value || 'new';
+  const speed = speedSel ? Number(speedSel.value) : null;
   // A live placeholder where the result will land, instead of one toast and
   // four minutes of nothing. Elapsed-only for the bar scale: the workflow is
   // only known when the final frame arrives, so a video crawls honestly.
@@ -3492,7 +3528,7 @@ async function remakeAsset(a, strip) {
   strip.appendChild(pending);
   const t0 = Date.now();
   const r = await studioStream('/api/studio/remake',
-    { asset_id: a.id, prompt, seed },
+    { asset_id: a.id, prompt, seed, ...(speed != null ? { speed } : {}) },
     (m) => { pStatus.textContent = m; },
     (p) => {
       pStatus.textContent = p.queue != null && p.queue > 0

@@ -1680,6 +1680,15 @@ class Handler(BaseHTTPRequestHandler):
                      # scrubbed, never expanded: {{prompt}} is a ComfyUI slot
                      "prompt": ad.get("prompt", ""),
                      "seed": ad.get("seed"), "workflow": ad.get("workflow"),
+                     # Pace, but only where the graph really has the slot —
+                     # OmniVoice does, IndexTTS-2 (voice-emotion) and the
+                     # music graph do not, and offering a control that
+                     # silently does nothing is worse than not offering it.
+                     # The client shows its picker iff this is not null.
+                     "speed": ((ad.get("values") or {}).get("speed")
+                               if "speed" in (wfpack.BUNDLED.get(
+                                   ad.get("workflow") or "", {})
+                                   .get("slots") or {}) else None),
                      # the job blob stays server-side: it carries on-disk
                      # reference filenames and LoRA names
                      "can_remake": bool(ad.get("job"))})
@@ -5038,6 +5047,17 @@ class Handler(BaseHTTPRequestHandler):
                 values["audio_text"] = text
             else:
                 values["prompt"] = text
+
+        # Pace is the second lever on a voice take, and the one you want
+        # after hearing the first: the words and the seed were right, she
+        # just needs to slow down. Clamped to the node's own 0.5-2.0 — a
+        # value outside it rejects the whole graph, and this path does not
+        # run review(), so nothing else would catch it.
+        if body.get("speed") not in (None, ""):
+            try:
+                values["speed"] = max(0.5, min(2.0, float(body["speed"])))
+            except (TypeError, ValueError):
+                pass
 
         seed = body.get("seed", "same")
         if seed == "new":

@@ -658,6 +658,33 @@ def review(job: dict, values: dict, installed=None) -> list:
         notes.append(f"Speed {speed} is outside the 0.9–1.1 range cloning was "
                      f"measured safe at. It may still be fine — listen before "
                      f"you trust it.")
+    # Bracketed tokens in the spoken text. An unknown one is not ignored and
+    # not "less effective" — it is READ OUT, because to the tokenizer it was
+    # only ever text. Cheap to catch here, and the fix is to edit the words
+    # in the box above the button.
+    said = str(values.get("audio_text") or "")
+    if said:
+        found = re.findall(r"\[[^\[\]]{1,40}\]", said)
+        unknown = []
+        for tag in found:
+            if tag.lower() in NON_VERBAL_TAGS or tag in unknown:
+                continue
+            # [Speaker_1]: is the multi-speaker dialogue format, not a tag.
+            if re.fullmatch(r"\[speaker[_ ]?\d+\]", tag.lower()):
+                continue
+            unknown.append(tag)
+        broken = [t for t in {x.lower() for x in found} if t in BROKEN_TAGS]
+        for tag in sorted(broken):
+            notes.append(f"{tag} {BROKEN_TAGS[tag]}. Cut it or use [sigh].")
+        if unknown:
+            notes.append(
+                f"{', '.join(unknown)} will be SPOKEN, not performed — a "
+                f"tag is plain text to the model, so one it does not know "
+                f"comes out as the word. It knows [sigh], [laughter], "
+                f"[sniff], [confirmation-en], the [question-*] and "
+                f"[surprise-*] sets, and [dissatisfaction-hnn]. Delete these "
+                f"or swap them for one of those.")
+
     amb = str(values.get("ambience") or "")
     if amb and not any(w in amb.lower() for w in
                        ("steady", "continuous", "constant", "unchanging")):
@@ -666,6 +693,40 @@ def review(job: dict, values: dict, installed=None) -> list:
                      "and 'constant unchanging'.")
     return notes
 
+
+# The model's non-verbal tags, taken from the OmniVoice node's own
+# NON_VERBAL_TAGS reference list — which, read in its source, is defined and
+# never used: nothing in the node or the model validates a tag.
+#
+# That is the whole explanation for "some tags get read out literally". These
+# are NOT special tokens. Checked directly against the shipped tokenizer:
+# 33 added tokens, not one of them a bracketed tag, and no tag is a single
+# vocab entry either. They are ordinary text the model was TRAINED to
+# perform, so how reliably any one of them lands is a property of the
+# weights, not of a lookup — and a tag the model does not know is simply
+# spoken, because to the tokenizer it was never anything else.
+#
+# Which means an INVENTED tag is guaranteed to be read aloud. That is the
+# case worth catching: the ASMR brief tells the writer to lean on tags, and a
+# model asked for intimacy happily writes [moan], [gasp] or [wet]. None of
+# them exist; all of them get pronounced.
+NON_VERBAL_TAGS = {
+    "[laughter]", "[sigh]", "[sniff]", "[confirmation-en]",
+    "[question-en]", "[question-ah]", "[question-oh]",
+    "[question-ei]", "[question-yi]",
+    "[surprise-ah]", "[surprise-oh]", "[surprise-wa]", "[surprise-yo]",
+    "[dissatisfaction-hnn]",
+}
+
+# Documented, and measured NOT to work on this build. `[sniff]` is in the
+# node's own list and in OmniVoice's README, and it comes out as the English
+# word "sniff" in her voice — 5 renders, 5 different seeds, 5 times, while
+# [sigh] performed correctly in all 5. Deterministic, not a seed lottery.
+# Kept in NON_VERBAL_TAGS (it IS a documented tag, and a user who types it
+# deliberately should get the specific reason, not "unknown tag") and warned
+# about separately.
+BROKEN_TAGS = {"[sniff]": "comes out as the spoken word \"sniff\" — measured "
+                          "across five seeds on this build, every time"}
 
 VOICE_VOCAB = {
     "male", "female",

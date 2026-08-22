@@ -419,6 +419,43 @@ check("the closed vocabulary is enforced on both paths",
           studio.review({"workflow": "asmr-clone"},
                         {"instruct": "female, sultry"})))
 
+# ── non-verbal tags: an invented one is SPOKEN, not ignored ────────
+# The tags are not special tokens — verified against the shipped tokenizer,
+# where none of them is a token or even a single vocab entry. They are plain
+# text the model was trained to perform, so one it does not know comes out of
+# her mouth as the word. That is the reported bug, and it is why this warns.
+print("\nnon-verbal tags")
+def tagnote(text):
+    return " ".join(n for n in studio.review(
+        {"workflow": "asmr-clone"}, {"audio_text": text}) if "SPOKEN" in n)
+
+check("an invented tag is caught", "[moan]" in tagnote("mm [moan] yes"))
+check("several are named, not just the first",
+      all(t in tagnote("[moan] a [gasp] b") for t in ("[moan]", "[gasp]")))
+check("every real tag passes",
+      not tagnote(" ".join(sorted(studio.NON_VERBAL_TAGS))),
+      tagnote(" ".join(sorted(studio.NON_VERBAL_TAGS))))
+check("case does not matter", not tagnote("[SIGH] hello"))
+check("the multi-speaker format is not a tag",
+      not tagnote("[Speaker_1]: hi [Speaker_2]: hello"))
+check("plain prose is left alone", not tagnote("no brackets here at all"))
+check("the warning says what will happen, not just that it is wrong",
+      "SPOKEN" in tagnote("[wet]") and "[sigh]" in tagnote("[wet]"))
+# The two tags CoomKit's dialect used to omit are real and must not warn.
+check("[question-ei] and [question-yi] are real tags",
+      not tagnote("[question-ei] hm [question-yi] hm"))
+
+# ── speed is offered only where the graph has the slot ─────────────
+# The remake dialog shows its speed picker off the server's `speed` key, and
+# the server derives that from the workflow's slots. Offering a control that
+# silently does nothing is worse than not offering one.
+print("\nspeed slots")
+for wf in ("voice-clone", "voice-design", "asmr-clone"):
+    check(f"{wf} exposes speed",
+          "speed" in (wfpack.BUNDLED[wf].get("slots") or {}))
+check("voice-emotion does NOT (IndexTTS-2 has no speed input)",
+      "speed" not in (wfpack.BUNDLED["voice-emotion"].get("slots") or {}))
+
 # ── 15. tags, artists and dialect gating ───────────────────────────
 print("\ntags and artist blending")
 import tags as _tags  # noqa: E402

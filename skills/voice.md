@@ -31,9 +31,11 @@ Include only the keys the path needs. `text` is always required.
 
 ## The vocabulary is closed
 
-`voice_instruct` and `instruct` are **validated against a fixed list**. An
-unsupported value is not ignored — it is rejected, and the generation fails.
-This is the single most common way to break a voice job.
+`voice_instruct` and `instruct` take values from a **fixed list**. An
+unsupported value is not ignored and not interpreted — it is passed to the
+model as text it has no meaning for, so it steers nothing while reading as if
+it should. CoomKit warns you before the render rather than after it. This is
+the single most common way to waste a voice job.
 
 | Category | The only permitted values |
 |---|---|
@@ -57,8 +59,41 @@ punctuation, sentence length, and the non-verbal tags below.
 Insert these inline, in the text:
 
 `[laughter]` · `[sigh]` · `[sniff]` · `[question-en]` · `[question-ah]` ·
-`[question-oh]` · `[surprise-ah]` · `[surprise-oh]` · `[surprise-wa]` ·
-`[surprise-yo]` · `[dissatisfaction-hnn]` · `[confirmation-en]`
+`[question-oh]` · `[question-ei]` · `[question-yi]` · `[surprise-ah]` ·
+`[surprise-oh]` · `[surprise-wa]` · `[surprise-yo]` ·
+`[dissatisfaction-hnn]` · `[confirmation-en]`
+
+**That list is exact, and inventing a tag is worse than using none.** A tag
+is not a special token — checked against the shipped tokenizer, not one of
+these is a token or even a single vocabulary entry. They are ordinary text
+the model was trained to perform, which has one consequence you have to
+write around: a tag it does not know is not ignored, it is **read out as a
+word**. `[moan]`, `[gasp]`, `[kiss]`, `[wet]` and `[breathy]` do not exist,
+and each one puts that word in her mouth, out loud, in the middle of the
+line.
+
+### What each one actually sounds like
+
+Rendered here, one tag per take, and transcribed back to see what came out:
+
+| Tag | What you get |
+|---|---|
+| `[sigh]`, `[laughter]` | breath — no words. **The safest two.** |
+| `[surprise-ah]` | a wordless vocalisation |
+| `[confirmation-en]` | "mmm" |
+| `[question-en]` | "mmm?" |
+| `[question-ah]` / `[question-oh]` | "ah?" / "oh?" |
+| `[question-ei]` / `[question-yi]` | "hey?" / "yi?" |
+| `[surprise-oh]` / `[surprise-wa]` / `[surprise-yo]` | "oh!" / "wah!" / "yo!" |
+| `[dissatisfaction-hnn]` | "hmph!" |
+| `[sniff]` | **the spoken word "sniff" — broken, do not use** |
+
+`[sniff]` is documented by OmniVoice and does not work: five renders across
+five seeds all pronounced it, while `[sigh]` performed correctly in all
+five. It is deterministic, so rerolling will not save it. Use `[sigh]`.
+
+The rest are learned text rather than switches, so treat the table as what
+they did here, not a guarantee. If a take reads a tag aloud, cut the tag.
 
 These are the whole expressive toolkit. A line reads as intimate because it is
 short, because it breaks, because there is a `[sigh]` before it — not because
