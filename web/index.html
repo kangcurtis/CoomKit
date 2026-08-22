@@ -212,7 +212,7 @@
     <button class="icon-btn" id="toggleLeft" title="Roster ([)">◧</button>
     <button class="icon-btn" id="toggleRight" title="Side panel (])">◨</button>
     <button class="icon-btn" id="toggleZen" title="Zen: just the chat (\)">⛶</button>
-    <button class="icon-btn" id="toggleTheme" title="Switch colour theme">◐</button>
+    <button class="icon-btn" id="toggleTheme" title="Switch colour theme" aria-label="Switch colour theme">◐</button>
     <button class="icon-btn" id="openTour" title="Show me around">?</button>
     <button class="icon-btn" id="openWizard" title="Run first-time setup again">✦</button>
     <button class="icon-btn" id="openSettings" title="Settings">⚙</button>
@@ -1229,6 +1229,11 @@
       <button id="mhImport">import a card</button>
       <button id="mhSync">sync from my desktop</button>
       <button id="mhSettings">settings</button>
+      <!-- Under 700px style.css hides .topbar outright, which takes
+           #toggleTheme with it. This menu is the mobile SMS mode's only
+           chrome, so without an entry here the themes are unreachable on a
+           phone — which is where a high-contrast one is wanted most. -->
+      <button id="mhTheme">colour theme</button>
     </div>
   </div>
   <input id="mhSearch" class="mh-search" type="search"

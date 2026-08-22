@@ -1138,7 +1138,36 @@ defines the palette in `:root`; a theme redefines the same names under
 a token — no literal outside those blocks except pure black shadows and
 `#fff`/`#000` — and anything needing alpha composes from an `-rgb` triplet
 (`rgba(var(--accent-rgb), .16)`), which is why the triplets exist and why they
-must move with their hex.
+must move with their hex. Four ship: `rose` (the default, in `:root`),
+`crimson`, `hunter` and `daylight`, cycled by `#toggleTheme` and — since the
+mobile media query hides the whole topbar — by an entry in the phone's `⋮`
+menu, both going through one `cycleTheme()`.
+
+**A colour token was not enough, because some values encode a DIRECTION rather
+than a hue, and the direction flips on a light ground.** They live in the
+palette blocks as plain scalars and every dark palette declares the value that
+was hardcoded before them, so they changed nothing when they landed:
+`--shadow-k` (every hand-typed `rgba(0,0,0,.NN)` in the file is multiplied by
+it — `.7` black under a 90px blur is a grey smudge on paper, not a shadow),
+`--btn-hover-k` (`.primary-btn:hover` was `brightness(1.1)`, which means "more
+prominent" only while prominent means lighter — under 1 it darkens instead),
+`--focus-a` (the focus ring is a wash of `--accent`, and it is the app's ONLY
+focus affordance on inputs since `outline: none`), and `--dim-o` (`:disabled`
+and `.blk-row.off` fade TOWARD the ground, so the same `.45` that leaves a
+light chip readable on near-black leaves a dark one at about 1.7:1 on paper).
+`test_theme.py`'s `scalars()` check exists because `hexes()` selects by value
+SHAPE, so a scalar was the one kind of token a palette could silently forget.
+
+**`--ink` was doing two jobs that only agree on a dark palette, and they are
+split.** `--ink` is the deepest GROUND — panel insets (`.prompt-dump`,
+`.phone-shell`), and the gradient `.her-id` lays over an arbitrary portrait
+with `var(--text)` on top of it — so on a light palette it is the LIGHTEST
+value in the block, not a near-black. `--scrim` is what dims the page behind a
+modal and stays dark in every theme. Five sites are scrims (`.viewer`,
+`.modal-back`, `.tour-dim`, its over-modal top-up, and the tour ring's
+9999px shadow); everything else keeps `--ink`. Repoint `.her-id` at the scrim
+"because it sits over a photo" and a light theme renders black text on a black
+plate.
 
 **The selector is a BARE attribute selector, never `:root[data-theme=…]`, and
 this is the whole trap.** `ckRaster` builds its own document — `svg >
@@ -1168,11 +1197,82 @@ it actually sits on. Both palettes now clear all 17 pairs and
 `tests/test_theme.py` keeps them there, so a third theme cannot ship worse.
 Fixing it visibly restyled the rose theme; that was the right trade.
 
+**The original seventeen pairs were written by reading a DARK palette, and the
+holes only bite on a light one.** `--bg` was assumed to be the darkest ground,
+so `--accent` was measured against `--surface` alone; `--surface-0` and `--ink`
+were never treated as grounds at all; and `--gold`, `--bad` and `--bad-lit` —
+the destructive-control colours — were never measured. The list is 38 now and
+both shipped palettes already cleared every addition, so widening it restyled
+nothing. **`--line` is deliberately NOT in that list**: it draws the 1px
+`.layout` gaps and every input, `.ghost-btn` and `.bubble` edge, and both dark
+palettes run it as a near-invisible hairline on purpose (rose 1.66:1). It is
+required of the high-contrast palette only.
+
+**Which bar a palette is held to is read out of its own name.** A theme whose
+`THEMES` label in app.js contains "high contrast" is measured at AAA (7.0) for
+every text pair and 4.5 for every non-text one, and gets the `--line` pairs on
+top. Renaming it in the UI changes what the suite enforces, which is the point:
+the claim and the guarantee are the same string.
+
+**Token pairs measure a FLAT ground and about twenty rules do not have one.**
+They paint `rgba(var(--x-rgb), .16)` and write `var(--x-lit)` on top, and the
+wash moves the ground toward the text — about a fifth of the ratio, measured.
+Live in a browser, `.blk-tag.ex` came out at 6.33 on daylight while its token
+pair read 7.94. `test_theme.py` SCANS those pairs out of the stylesheet rather
+than listing them, so a new chip is covered the day it is written; the ground
+is approximated as `--surface`/`--surface-2`, which is the honest limit of a
+static check.
+
+**`.col-left` was painting the grid-gap colour, and had been since it was
+written.** `background` is a shorthand, so
+`.col-left { background: linear-gradient(…) }` reset `background-color` to
+transparent and wiped out `.col { background: var(--bg) }` — leaving the
+roster column showing `.layout`'s own background, which is `var(--line)` and
+exists only to colour the 1px gaps. Measured on the shipped rose theme: the
+column's ground was `#46325F` instead of anything intentional, which drags the
+roster's own text ("151 chats", the column heading, "you are") to **4.01:1**,
+under AA, in the default theme. Found by walking the live DOM and compositing
+every layer rather than by reading tokens — no token-pair test can see it,
+because no token is wrong.
+
+The rail keeps its tint, from `--surface` — it reads as a panel, which is what
+it looks like. **`--surface` is as high up the ramp as it can go**: every
+control in that column fills with `--surface-2` and hovers to `--surface-3`,
+so a rail at either swallows its own buttons, or their hover as well. The
+gradient went with it rather than staying on as a no-op — it was a sheen
+approximating "make the top of the rail look like a panel", and the rail is
+one now. Every text pair involved (`--text`/`--text-dim`/`--text-mute` on
+`--surface`) is already in `test_theme.py`'s list, which `--line` never was;
+that is the real difference between the two grounds.
+
 **`--ok` has 28° of hue clearance in the green theme and no more.** Accent H151
 and `--second` H207 leave a 56° corridor; teal H179 is the midpoint. The old
 palette had 136°. Widening it means moving `--second` close enough to the
 accent that it reads as *the accent, disabled*. Recorded so nobody re-derives
 it — and it is why `.dot.bad` had to stop borrowing `--accent-deep`.
+
+**That constraint is a test now, and crimson is what forced it.** `--bad` is
+red, so in a red-accented palette error state can become indistinguishable from
+ordinary chrome — every button, border and badge reading as an alarm. Hue angle
+is the wrong measure (it ignores lightness), so `test_theme.py` §4b uses CIE76
+dE over the whole pair, with a floor of **25** — not invented, but what the
+tightest SHIPPED pair already clears (rose's `--accent-lit` against `--bad-lit`,
+at 25.2). It says no palette may make error harder to spot than rose already
+does.
+
+Measured over the hue circle with crimson's accent pinned at H358, each
+candidate taken to the lightest value that still clears 4.5:1 on `--surface`:
+**the shipped `--bad` (H0, used by both rose and hunter) is 3.5 dE from that
+accent** — not similar, the same colour. The red-through-magenta arc never
+clears the floor (H350 is 13.7, H6 is 10.5, H16 is 25.6 and already reads as a
+duller accent; H340 makes it at 28.3 but looks pink). The corridor is H20-H32,
+bounded on the far side by `--gold` at H44 — by H40 the error colour is 25.9 dE
+from the DIRECTOR colour instead. So crimson's traffic light is green / brass /
+**ORANGE** at H22 — 33.3 dE from `--accent`, 41.1 from `--gold` — and the red
+belongs to the brand. Its `--second`
+is a low-chroma iron blue rather than the sky blue the first cut used: at S47
+it measured **8.7 dE from hunter's `--second`**, i.e. the two themes shared a
+secondary colour and felt related; dropping to S19 puts it at 19.
 
 
 **The image export is a SECOND consumer of `style.css`, and it fails silently
@@ -1823,11 +1923,29 @@ than asserting after a fixed number of exchanges.
   backend untouchable. Unlike the KoboldCpp one, this protocol WAS run
   against the real thing before the stand-in was written. Offline and free.
 - `tests/test_theme.py` pins the palettes: every theme defines every token the
-  default does, every `-rgb` triplet matches its hex, no palette literal
-  escapes the palette blocks, all 17 contrast pairs clear WCAG AA in BOTH
-  themes, and `CK_TOKENS` covers the whole palette so the export cannot carry
-  a stale colour. Each guard was proven by deliberately breaking it. Offline
-  and free — it is arithmetic over style.css.
+  default does (scalars included), every `-rgb` triplet matches its hex, no
+  palette literal escapes the palette blocks, all 38 contrast pairs clear WCAG
+  AA in ALL FOUR themes — AAA plus the `--line` pairs for any theme whose name
+  says "high contrast" — the self-tinted chips scanned out of the stylesheet
+  clear it too, the semantic colours stay 25 dE apart, `THEMES` and the
+  `[data-theme]` blocks agree in both directions, and `CK_TOKENS` covers the
+  whole palette so the export cannot carry a stale colour. **The palette list
+  is DERIVED from style.css**, not hand-written: every section iterates it, so
+  a block that is not in the list is not partially tested, it is entirely
+  untested, contrast included, and the suite stays green while shipping it.
+  Each guard was proven by deliberately breaking it. Offline and free — it is
+  arithmetic over style.css.
+
+  What it CANNOT see, and what caught the `.col-left` bug instead: anything
+  composited at runtime. Opacity dims toward whatever is behind, a `background`
+  shorthand can silently drop the ground out from under a column, and a token
+  pair is right about two colours that never actually meet. Those need the DOM,
+  which means a browser, which this suite does not have. Walk it by hand after
+  a palette change: compute each visible text node's colour and its effective
+  ground by compositing every ancestor layer (multiplying each layer's alpha by
+  the product of the opacities of that element and its ancestors — a faded chip
+  fades its own background alongside its text, and getting that wrong reports it
+  far darker than it renders).
 - `tests/test_lore.py` pins lorebooks, and its FIRST section is the gate on the
   whole feature: today's `_lorebook_entries` is kept verbatim as an oracle and
   diffed against `lore.from_card` + `lore.select` over 19 entry shapes and 6
@@ -1984,7 +2102,8 @@ history, entrance cards), **llama-server VRAM parking (router mode)**,
 **persona-scoped memory + mid-chat persona rebind**, **H3 gallery
 references + duration control + SSE render progress**, **the icon sprite**,
 **block autosave + dormant-layer honesty + the mode badge**, **the inline
-greeting cycler**, **the mobile SMS mode**, **the LAN datapack clone**.
+greeting cycler**, **the mobile SMS mode**, **the LAN datapack clone**,
+**four themes including a light high-contrast one**.
 
 Measured on that machine: anima 9.0s, krea2 12.0s (13.5s with the required
 MysticXXX LoRA), klein 9.1s, ASMR 20s in 6.4s, MiniMax Music 3 40s in 36s,

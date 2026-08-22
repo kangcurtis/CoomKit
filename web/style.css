@@ -23,6 +23,12 @@
   /* Below --bg. Five hand-typed near-blacks (#050308 #06030A #08050C #08050D
      #0D0813) were all doing this one job, so they collapse to one token. */
   --ink:       #06030A;    --ink-rgb: 6,3,10;
+  /* The scrim behind a modal, and NOT --ink, though they are the same colour
+     on every dark palette. --ink is the deepest GROUND: panel insets, and the
+     gradient over a portrait that has var(--text) sitting on top of it. On a
+     light palette the ground has to go white and the scrim has to stay dark,
+     so the two jobs part company and one token cannot do both. */
+  --scrim:     #06030A;    --scrim-rgb: 6,3,10;
   --bg:        #0B0710;
 
   --bg-rgb:        11,7,16;
@@ -47,10 +53,25 @@
 
   --ok-rgb:        111,227,168;
 
+  /* Shadow strength. Every hand-typed alpha in this file is multiplied by it,
+     so 1 is byte-identical to what was there before. A light palette turns it
+     down: .7 black under a 90px blur is a grey smudge on white, not a shadow. */
+  --shadow-k: 1;
+  /* Three more scalars that encode a DIRECTION rather than a colour, and so
+     cannot live in a hex token. Each is the dark-palette value, so the
+     rendered result is unchanged from before they existed. */
+  --btn-hover-k: 1.1;   /* .primary-btn hover: >1 brightens toward a dark ground */
+  --focus-a:     .13;   /* the focus ring is a wash of --accent at this alpha */
+  --dim-o:       .45;   /* :disabled fades TOWARD the ground, so it is ground-dependent */
+
   --r:   14px;
   --r-s: 10px;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+
+  /* Native chrome we do not draw: the text caret, <select> popups, date
+     pickers, and the scrollbar on anything that misses our own rule. */
+  color-scheme: dark;
 }
 /* ── hunter green ────────────────────────────────────────────────────────
    Moss, wet stone and antique brass. ONLY tokens are redefined; not one rule
@@ -73,6 +94,7 @@
   --gold-lit:    #F5D592;  --gold-lit-rgb:    245,213,146;
 
   --ink:       #040705;    --ink-rgb:     4,7,5;
+  --scrim:     #040705;    --scrim-rgb:   4,7,5;
   --bg:        #070C09;    --bg-rgb:      7,12,9;
   --surface-0: #0B120E;
   --surface:   #101A14;    --surface-rgb: 16,26,20;
@@ -94,6 +116,139 @@
   --bad:       #FF6B6B;
   --bad-lit:   #FF8A8A;
   --bad-line:  #A8465A;
+
+  --shadow-k: 1;
+  --btn-hover-k: 1.1;
+  --focus-a:     .13;
+  --dim-o:       .45;
+  color-scheme: dark;
+}
+
+/* ── crimson ─────────────────────────────────────────────────────────────
+   Scarlet on warm charcoal, with steel for the second voice and brass for the
+   director. Same rules as hunter: tokens only, bare attribute selector.
+
+   The hard problem in a red palette is that --bad is red too, so error state
+   can end up indistinguishable from ordinary chrome — every button, border and
+   badge reading as an alarm. The shipped red (H0, what rose and hunter both
+   use) measures 3.5 dE from this accent: not "similar", the same colour. The
+   whole circle was walked, each candidate taken to the lightest value that
+   still clears 4.5:1 on --surface, and the red-through-magenta arc never gets
+   there — H350 is 13.7, H340 is 28.3 but reads as pink, H6 is 10.5, H16 is
+   25.6 and already looks like a duller accent. The corridor is H20-H32, and it
+   is bounded on the other side by --gold at H44: by H40 the error colour is
+   25.9 dE from the DIRECTOR colour instead. --bad sits at H22 — 33.3 dE from
+   --accent, 41.1 from --gold. So the traffic light here is green / brass /
+   ORANGE, and the red belongs to the brand. tests/test_theme.py section 4b
+   enforces the 25 dE floor so a later tweak cannot quietly close the gap; the
+   numbers above come from that same arithmetic. */
+[data-theme="crimson"] {
+  --accent:       #F3494F;                 --accent-rgb: 243,73,79;
+  --accent-lit:   #FA8589;                 --accent-lit-rgb: 250,133,137;
+  --accent-deep:  #D04E54;                 --accent-deep-rgb: 208,78,84;
+  --second:       #98A5B9;                 --second-rgb: 152,165,185;
+  --second-lit:   #BDCADB;
+  --second-deep:  #6E84A6;                 --second-deep-rgb: 110,132,166;
+  --gold:         #F2C036;                 --gold-rgb: 242,192,54;
+  --gold-lit:     #F9D876;                 --gold-lit-rgb: 249,216,118;
+  --ink:          #110909;                 --ink-rgb: 17,9,9;
+  --scrim:        #110909;                 --scrim-rgb: 17,9,9;
+  --bg:           #170C0E;                 --bg-rgb: 23,12,14;
+  --surface-0:    #201314;
+  --surface:      #261719;                 --surface-rgb: 38,23,25;
+  --surface-2:    #342224;
+  --surface-3:    #453032;
+  --line:         #5A3F42;
+  --line-lit:     #A27C80;
+  --text:         #F9F1F2;
+  --text-dim:     #D5C3C6;
+  --text-mute:    #B8A3A6;
+  --on-accent:    #180608;
+  --ok:           #59CF94;                 --ok-rgb: 89,207,148;
+  --bad:          #F7803B;
+  --bad-lit:      #FB9F6A;
+  --bad-line:     #B25A34;
+
+  --shadow-k: 1;
+  --btn-hover-k: 1.1;
+  --focus-a:     .13;
+  --dim-o:       .45;
+  color-scheme: dark;
+}
+
+/* ── daylight ────────────────────────────────────────────────────────────
+   The light one, and it is not the others with the values flipped — it is
+   built for people who cannot read the others. Every text pair clears WCAG
+   AAA (7.0:1) rather than AA, every border clears 4.5:1 including --line,
+   which the dark palettes deliberately run as a near-invisible hairline
+   (rose: 1.66:1) and which here draws the only separation the three columns
+   have. test_theme.py holds this palette to that higher bar automatically,
+   keyed on the word "high contrast" in its THEMES label — so the claim the UI
+   makes and the bar the suite enforces cannot drift apart.
+
+   Warm paper, not white. #FFFFFF at full luminance is the glare surface for
+   exactly the light-sensitive readers this exists for, and stepping down to an
+   ivory ground costs almost nothing: --text on --bg measures 17.4:1 against
+   the 18.5:1 pure white would have given.
+
+   THE TOKEN NAMES ARE A TRAP AND THE INVERSION IS DELIBERATE. They were named
+   against a dark ground, so read them as roles, not as brightness:
+     · --ink is the ground FURTHEST from --text, so here it is the LIGHTEST
+       value in the palette. It is not the scrim — that is why they were split.
+       .her-id lays rgba(--ink-rgb, .92) over an arbitrary portrait and puts
+       --text on top of it; pinned dark, that is black text on a black plate.
+     · the ramp ink → bg → surface-0 → surface → surface-2 → surface-3 runs
+       progressively DARKER, i.e. toward the text, because that is the
+       direction it runs on the dark palettes and every rule below reads it
+       that way (hover moves one step along the ramp, and it has to move the
+       same way in every theme).
+     · "-lit" means MORE PROMINENT, never lighter. --accent-lit is DARKER than
+       --accent here, and --line-lit is darker than --line, or every emphasised
+       thing in the app would emphasise itself by fading out.
+   --on-accent inverts with them: the accent fill has to be dark to carry
+   contrast on a pale page, so the ink on it is near-white. */
+[data-theme="daylight"] {
+  --accent:       #970F58;                 --accent-rgb: 151,15,88;
+  --accent-lit:   #6E0B40;                 --accent-lit-rgb: 110,11,64;
+  --accent-deep:  #55082F;                 --accent-deep-rgb: 85,8,47;
+  --second:       #453596;                 --second-rgb: 69,53,150;
+  --second-lit:   #312573;
+  --second-deep:  #271C5C;                 --second-deep-rgb: 39,28,92;
+  --gold:         #684504;                 --gold-rgb: 104,69,4;
+  --gold-lit:     #4E3303;                 --gold-lit-rgb: 78,51,3;
+  --ink:          #FFFDF7;                 --ink-rgb: 255,253,247;
+  --scrim:        #241A0F;                 --scrim-rgb: 36,26,15;
+  --bg:           #FBF6EC;                 --bg-rgb: 251,246,236;
+  --surface-0:    #F8F1E4;
+  --surface:      #F5ECDB;                 --surface-rgb: 245,236,219;
+  --surface-2:    #EFE3CB;
+  --surface-3:    #E5D6B5;
+  --line:         #736041;
+  --line-lit:     #4A3820;
+  --text:         #17100A;
+  --text-dim:     #3A2C1C;
+  --text-mute:    #4C3A24;
+  --on-accent:    #FFF7FB;
+  --ok:           #0B411E;                 --ok-rgb: 11,65,30;
+  --bad:          #922110;
+  --bad-lit:      #78150F;
+  --bad-line:     #8A2118;
+
+  /* The four direction scalars, all of which point the other way here.
+     Shadow: .7 black under a 90px blur is a grey smudge on paper, not a
+     shadow. Hover: <1 DARKENS the primary button, because on this ground
+     "more prominent" is darker — brightness(1.1) would wash it out on the
+     one control that most needs to answer a click. Focus: the ring is a wash
+     of --accent and 13% of a dark accent over paper is a faint smear, where
+     13% of a light accent on near-black was a halo; this is the app's only
+     focus affordance on inputs. Disabled: opacity fades toward the GROUND, so
+     the same .45 that leaves a light chip readable on near-black leaves a dark
+     one at about 1.7:1 on paper. */
+  --shadow-k:    .32;
+  --btn-hover-k: .88;
+  --focus-a:     .55;
+  --dim-o:       .62;
+  color-scheme: light;
 }
 
 
@@ -181,14 +336,14 @@ button {
 }
 button:hover { background: var(--surface-3); color: var(--text); border-color: var(--accent-deep); }
 button:active { transform: translateY(1px); }
-button:disabled { opacity: .45; cursor: not-allowed; }
+button:disabled { opacity: var(--dim-o); cursor: not-allowed; }
 
 .primary-btn {
   background: linear-gradient(135deg, var(--accent), var(--accent-deep));
   border-color: transparent; color: var(--on-accent); font-weight: 650;
   box-shadow: 0 2px 14px rgba(var(--accent-rgb), .28);
 }
-.primary-btn:hover { filter: brightness(1.1); color: var(--on-accent); border-color: transparent; }
+.primary-btn:hover { filter: brightness(var(--btn-hover-k)); color: var(--on-accent); border-color: transparent; }
 .ghost-btn { background: none; border-color: var(--line); font-size: 12px; padding: 5px 9px; }
 .icon-btn { padding: 6px 9px; background: var(--surface-2); }
 .danger-btn { border-color: rgba(var(--accent-deep-rgb), .5); color: var(--accent-lit); background: rgba(var(--accent-deep-rgb), .12); }
@@ -209,7 +364,7 @@ input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=file]) 
 input::placeholder, textarea::placeholder { color: var(--text-mute); opacity: 1; }
 textarea { resize: vertical; }
 textarea:focus, input:focus, select:focus {
-  border-color: var(--accent-deep); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .13);
+  border-color: var(--accent-deep); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), var(--focus-a));
 }
 select {
   cursor: pointer; appearance: none; padding-right: 26px;
@@ -232,7 +387,7 @@ select {
   width: 320px; max-width: calc(100vw - 16px); padding: 8px;
   border: 1px solid var(--line-lit);
   border-radius: var(--r-s); background: var(--surface-2);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, calc(.45 * var(--shadow-k)));
   display: flex; flex-direction: column; gap: 6px; }
 .model-pop input { width: 100%; }
 .model-pop-list { max-height: 58vh; overflow-y: auto;
@@ -295,7 +450,23 @@ body.zen .topbar { display: none; }
 }
 .zen-out:hover { opacity: 1; color: var(--text); border-color: var(--line-lit); }
 .col { background: var(--bg); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.col-left { background: linear-gradient(180deg, rgba(var(--surface-rgb), .55), transparent 42%); }
+/* The rail is a PANEL, and saying so is the fix for a bug that shipped with
+   the rule. `background` is a shorthand, so the old
+   `background: linear-gradient(…)` reset background-color to transparent and
+   wiped out `.col { background: var(--bg) }` above — leaving this column
+   painting whatever showed through, which is `.layout`'s own background,
+   `var(--line)`, there only to colour the 1px grid gaps. Measured on the
+   shipped rose theme: the ground was #46325F, which is off the top of the
+   elevation ramp and drags the column's own text ("151 chats", the heading,
+   "you are") to 4.01:1 — under AA, in the default theme, since it was written.
+
+   --surface is the token for a panel, and it is as high as this one can go:
+   every control in this column fills with --surface-2 and hovers to
+   --surface-3, so a rail at either of those swallows its own buttons or their
+   hover. The gradient that used to sit here was a sheen approximating "make
+   the top of the rail look like a panel"; the rail is one now, so it goes
+   rather than staying on as a no-op. */
+.col-left { background: var(--surface); }
 
 .col-head {
   flex: none; display: flex; align-items: center; gap: 8px;
@@ -338,7 +509,7 @@ body.zen .topbar { display: none; }
 .ava-pop {
   position: fixed; z-index: 150; pointer-events: none;
   border-radius: 14px; overflow: hidden; border: 1px solid var(--line-lit);
-  background: var(--surface); box-shadow: 0 20px 56px rgba(0,0,0,.66);
+  background: var(--surface); box-shadow: 0 20px 56px rgba(0, 0, 0, calc(.66 * var(--shadow-k)));
   animation: pop .12s ease;
 }
 /* Letterboxed, not cropped, and sized from the viewport by the JS above —
@@ -353,7 +524,7 @@ body.zen .topbar { display: none; }
 .viewer {
   position: fixed; inset: 0; z-index: 200; display: none;
   align-items: center; justify-content: center; padding: 28px;
-  background: rgba(var(--ink-rgb), .88); backdrop-filter: blur(4px);
+  background: rgba(var(--scrim-rgb), .88); backdrop-filter: blur(4px);
 }
 .viewer.on { display: flex; }
 .viewer-stage {
@@ -363,7 +534,7 @@ body.zen .topbar { display: none; }
 .viewer-stage img, .viewer-stage video {
   display: block; max-width: 94vw; max-height: 88vh;
   width: auto; height: auto; object-fit: contain;
-  border-radius: var(--r-s); box-shadow: 0 30px 90px rgba(0,0,0,.7);
+  border-radius: var(--r-s); box-shadow: 0 30px 90px rgba(0, 0, 0, calc(.7 * var(--shadow-k)));
 }
 .viewer-x {
   position: absolute; top: 14px; right: 16px; z-index: 2;
@@ -573,7 +744,7 @@ body.zen .topbar { display: none; }
   color: var(--gold-lit); font-size: 12.5px;
 }
 .director input:focus, .director textarea:focus {
-  border-color: var(--gold); box-shadow: 0 0 0 3px rgba(var(--gold-rgb), .13);
+  border-color: var(--gold); box-shadow: 0 0 0 3px rgba(var(--gold-rgb), var(--focus-a));
 }
 .director input::placeholder, .director textarea::placeholder { color: rgba(var(--gold-lit-rgb), .4); }
 .director .tag { font: 600 9.5px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; color: var(--gold-lit); flex: none; }
@@ -696,14 +867,14 @@ body.zen .topbar { display: none; }
 /* ── modal ────────────────────────────────────────────────────── */
 .modal-back {
   position: fixed; inset: 0; z-index: 100; display: none;
-  background: rgba(var(--ink-rgb), .72); backdrop-filter: blur(3px);
+  background: rgba(var(--scrim-rgb), .72); backdrop-filter: blur(3px);
   align-items: center; justify-content: center; padding: 24px;
 }
 .modal-back.on { display: flex; }
 .modal {
   width: min(720px, 100%); max-height: 90vh; overflow-y: auto;
   background: var(--surface); border: 1px solid var(--line-lit);
-  border-radius: var(--r); box-shadow: 0 24px 70px rgba(0,0,0,.6);
+  border-radius: var(--r); box-shadow: 0 24px 70px rgba(0, 0, 0, calc(.6 * var(--shadow-k)));
 }
 .modal-head {
   display: flex; align-items: center; gap: 10px; padding: 13px 16px;
@@ -790,7 +961,7 @@ body.zen .topbar { display: none; }
   background: var(--surface-3); border: 1px solid var(--accent-deep); color: var(--text);
   padding: 9px 15px; border-radius: 100px; font-size: 12.5px; z-index: 200;
   opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s;
-  box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, calc(.5 * var(--shadow-k)));
 }
 .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 
@@ -1050,7 +1221,7 @@ audio.gal-thumb {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 40;
   width: 100%; padding: 8px; border: 1px solid var(--line-lit);
   border-radius: var(--r-s); background: var(--surface-2);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, calc(.45 * var(--shadow-k)));
   display: flex; flex-direction: column; gap: 6px;
 }
 .lora-pick input { width: 100%; margin: 0; }
@@ -1143,7 +1314,7 @@ audio.gal-thumb {
   border: 1px solid var(--line); border-radius: var(--r-s);
   background: var(--surface-2); }
 .blk-row:hover { border-color: var(--line-lit); }
-.blk-row.off { opacity: .45; }
+.blk-row.off { opacity: var(--dim-o); }   /* same ground-dependence as :disabled */
 .blk-row.dragging { opacity: .35; }
 .blk-row.over { border-color: var(--accent); }
 .blk-grip { cursor: grab; color: var(--text-mute); font-size: 13px; text-align: center; }
@@ -1238,7 +1409,7 @@ audio.gal-thumb {
 .phone {
   position: fixed; right: 26px; bottom: 26px; z-index: 80;
   width: 348px; height: 660px; max-height: calc(100vh - 52px);
-  filter: drop-shadow(0 26px 60px rgba(0,0,0,.62));
+  filter: drop-shadow(0 26px 60px rgba(0, 0, 0, calc(.62 * var(--shadow-k))));
 }
 .phone[hidden] { display: none; }
 .phone-shell {
@@ -1255,6 +1426,8 @@ audio.gal-thumb {
   background: var(--surface-0);
 }
 .phone-status:active { cursor: grabbing; }
+/* Deliberately NOT a token, and it was checked against the light palette:
+   a real handset has a black notch whatever colour the phone is. */
 .ps-notch { width: 62px; height: 15px; border-radius: 0 0 11px 11px; background: #000; margin-top: -9px; }
 .ps-right { display: flex; align-items: center; gap: 5px; }
 .ps-batt { width: 20px; height: 9px; border: 1px solid var(--text-mute);
@@ -1361,7 +1534,7 @@ audio.gal-thumb {
   padding: 10px 15px; border-radius: 999px; cursor: pointer;
   background: linear-gradient(135deg, var(--accent), var(--second-deep));
   color: var(--on-accent); font: 700 12.5px/1 var(--sans);
-  box-shadow: 0 10px 26px rgba(0,0,0,.5);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, calc(.5 * var(--shadow-k)));
 }
 .phone-tab[hidden] { display: none; }
 .pt-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
@@ -1374,7 +1547,7 @@ audio.gal-thumb {
   width: min(880px, 94vw); max-height: 92vh;
   background: var(--surface); border: 1px solid var(--line-lit);
   border-radius: var(--r); overflow: hidden;
-  box-shadow: 0 30px 80px rgba(0,0,0,.6);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, calc(.6 * var(--shadow-k)));
 }
 @media (max-width: 720px) { .wiz { grid-template-columns: 1fr; } .wiz-side { display: none; } }
 
@@ -1432,15 +1605,15 @@ audio.gal-thumb {
 
 .tour { position: fixed; inset: 0; z-index: 120; }
 .tour[hidden] { display: none; }
-.tour-dim { position: absolute; inset: 0; background: rgba(var(--ink-rgb), .72); }
+.tour-dim { position: absolute; inset: 0; background: rgba(var(--scrim-rgb), .72); }
 /* A modal backdrop already dims at 72% with a blur. Stacking the tour's own
    dim on it lands near 92% and reads as the lights going out. */
-.tour.tour-over-modal .tour-dim { background: rgba(var(--ink-rgb), .14); }
+.tour.tour-over-modal .tour-dim { background: rgba(var(--scrim-rgb), .14); }
 /* The "hole" is a giant outline rather than a real cut-out — one element,
    no clip-path maths, and it dims everything except the target. */
 .tour-ring {
   position: absolute; border-radius: 12px; pointer-events: none;
-  box-shadow: 0 0 0 9999px rgba(var(--ink-rgb), .72), 0 0 0 2px var(--accent),
+  box-shadow: 0 0 0 9999px rgba(var(--scrim-rgb), .72), 0 0 0 2px var(--accent),
               0 0 26px rgba(var(--accent-rgb), .5);
   transition: top .28s cubic-bezier(.4,0,.2,1), left .28s cubic-bezier(.4,0,.2,1),
               width .28s, height .28s;
@@ -1449,7 +1622,7 @@ audio.gal-thumb {
   position: absolute; display: flex; gap: 11px; align-items: flex-start;
   width: min(430px, 92vw); padding: 13px 15px;
   background: var(--surface); border: 1px solid var(--line-lit);
-  border-radius: var(--r); box-shadow: 0 20px 50px rgba(0,0,0,.6);
+  border-radius: var(--r); box-shadow: 0 20px 50px rgba(0, 0, 0, calc(.6 * var(--shadow-k)));
   transition: top .28s cubic-bezier(.4,0,.2,1), left .28s cubic-bezier(.4,0,.2,1);
 }
 .tour-gemma { width: 84px; border-radius: var(--r-s); background: #fff; flex: 0 0 auto; }
@@ -1669,7 +1842,7 @@ audio.gal-thumb {
   position: absolute; top: calc(100% + 4px); right: 14px; z-index: 40;
   width: 250px; padding: 8px; border: 1px solid var(--line-lit);
   border-radius: var(--r-s); background: var(--surface-2);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, calc(.45 * var(--shadow-k)));
   display: flex; flex-direction: column; gap: 6px;
 }
 .cast-pick input { width: 100%; }
@@ -1728,7 +1901,7 @@ audio.gal-thumb {
   min-width: 200px; padding: 6px;
   border: 1px solid var(--line-lit); border-radius: 12px;
   background: var(--surface-2);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, .5);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, calc(.5 * var(--shadow-k)));
 }
 .mh-menu button {
   padding: 12px 14px; border: 0; border-radius: 8px;
@@ -1781,7 +1954,7 @@ audio.gal-thumb {
   border: 0; border-radius: 18px;
   background: linear-gradient(135deg, var(--accent), var(--accent-deep));
   color: #fff; font-size: 22px; cursor: pointer;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, calc(.45 * var(--shadow-k)));
 }
 
 @media (max-width: 700px) {

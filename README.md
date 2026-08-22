@@ -156,10 +156,18 @@ static files.
 - **Director mode** — steer the scene from outside it. Stage direction she obeys
   without acknowledging.
 - Personas, sampler presets, jailbreak library, live sampler controls
-- **Themes.** Rose/violet or hunter green, toggled with ◐ in the topbar. Purely
-  tokens — every palette colour lives in one block, so a new theme is one CSS
-  block and nothing else. Both ship passing WCAG AA on all 17 measured pairs,
-  and a test keeps it that way.
+- **Themes.** Four of them, cycled with ◐ in the topbar (and from the ⋮ menu on
+  a phone): rose/violet, crimson, hunter green, and **daylight** — a light,
+  high-contrast palette for people who cannot comfortably read the dark ones.
+  Purely tokens: every palette colour lives in one block, so a theme is a CSS
+  block and nothing else, and the chatlog export carries whichever one you are
+  wearing. All four pass WCAG AA on 38 measured pairs; daylight is held to AAA
+  (7:1) on every text pair and 4.5:1 on every border, including the hairlines
+  the dark palettes deliberately keep faint. The test reads the word "high
+  contrast" out of the theme's own name to decide which bar to apply, so the
+  label and the guarantee cannot come apart.
+
+![The same screen in all four palettes](docs/shots/themes.png)
 - **It shows you round itself.** A first-run wizard finds your model, pings your
   ComfyUI and installs a starter library, and an 18-step walkthrough then points
   at the real interface — roster, forge, the studio's ten shots, the GPU broker,

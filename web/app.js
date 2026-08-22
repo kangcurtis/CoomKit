@@ -221,9 +221,6 @@ async function boot() {
   syncSceneFromPreset();
   loadPromptRail();          // the prompt rail is the default tab
   restoreUI(ui);
-  // The <head> script already set the attribute; this syncs S.theme and the
-  // button's tooltip without repainting.
-  applyTheme(localStorage.getItem('coomkit.theme.v1') || 'rose');
   await restoreChat(ui);
   // First run. This used to also require `!S.presets.length`, which
   // server.seed_first_run() makes permanently false — it installs the shipped
@@ -6940,9 +6937,16 @@ $('tourQuit').onclick = endTour;
 // coomkit.session.v1 because the <head> script has to read it before any of
 // this file has parsed, and parsing the whole session blob there would be
 // slower and would couple boot to the session schema.
+// Order is the cycle order: the three dark palettes, then the light one, so
+// somebody who wants a dark theme never lands on a white screen on the way to
+// it. The label is not decoration — tests/test_theme.py reads "high contrast"
+// out of it and holds that palette to WCAG AAA instead of AA, so renaming it
+// here changes what the suite enforces.
 const THEMES = [
   ['rose', 'Rose / violet'],
+  ['crimson', 'Crimson'],
   ['hunter', 'Hunter green'],
+  ['daylight', 'Daylight (high contrast)'],
 ];
 
 function applyTheme(name) {
@@ -6951,15 +6955,31 @@ function applyTheme(name) {
   else document.documentElement.setAttribute('data-theme', known);
   try { localStorage.setItem('coomkit.theme.v1', known); } catch { /* private mode */ }
   S.theme = known;
-  const b = $('toggleTheme');
+  const cur = THEMES.find((t) => t[0] === known);
   const next = THEMES[(THEMES.findIndex((t) => t[0] === known) + 1) % THEMES.length];
-  if (b) b.title = `Theme: ${THEMES.find((t) => t[0] === known)[1]} — click for ${next[1]}`;
+  const label = `Theme: ${cur[1]} — click for ${next[1]}`;
+  const b = $('toggleTheme');
+  // title alone is not the accessible name here: the button's only text is the
+  // glyph, so a screen reader announces "circle with left half black".
+  if (b) { b.title = label; b.setAttribute('aria-label', label); }
+  const m = $('mhTheme');
+  if (m) m.textContent = `colour theme — ${cur[1].toLowerCase()}`;
 }
 
-$('toggleTheme').onclick = () => {
+function cycleTheme() {
   const i = THEMES.findIndex((t) => t[0] === (S.theme || 'rose'));
   applyTheme(THEMES[(i + 1) % THEMES.length][0]);
-};
+}
+
+$('toggleTheme').onclick = cycleTheme;
+$('mhTheme').onclick = cycleTheme;
+
+// At PARSE time, not from boot(). The <head> script has already set the
+// attribute so there is nothing to repaint, but S.theme and the button labels
+// are read by the click handler — and boot() only reaches its own call after a
+// dozen awaited fetches, so a click during a slow start read S.theme as
+// undefined, fell back to 'rose' and cycled away from the user's stored theme.
+applyTheme(localStorage.getItem('coomkit.theme.v1') || 'rose');
 
 $('openTour').onclick = startTour;
 window.addEventListener('resize', () => { if (!$('tour').hidden) tourAt(S.tour); });
@@ -7143,12 +7163,18 @@ async function ckRaster(el, W, H) {
 // offset into the SVG viewport and the content lands outside it.
 // Every palette token, so the export can carry the ACTIVE theme.
 const CK_TOKENS = ['accent', 'accent-lit', 'accent-deep', 'second', 'second-lit',
-  'second-deep', 'gold', 'gold-lit', 'ink', 'bg', 'surface-0', 'surface',
+  'second-deep', 'gold', 'gold-lit', 'ink', 'scrim', 'bg', 'surface-0', 'surface',
   'surface-2', 'surface-3', 'line', 'line-lit', 'text', 'text-dim', 'text-mute',
   'on-accent', 'ok', 'bad', 'bad-lit', 'bad-line',
   'accent-rgb', 'accent-lit-rgb', 'accent-deep-rgb', 'second-rgb',
-  'second-deep-rgb', 'gold-rgb', 'gold-lit-rgb', 'ok-rgb', 'ink-rgb', 'bg-rgb',
-  'surface-rgb'];
+  'second-deep-rgb', 'gold-rgb', 'gold-lit-rgb', 'ok-rgb', 'ink-rgb',
+  'scrim-rgb', 'bg-rgb', 'surface-rgb',
+  // Not colours. Every one encodes a DIRECTION that flips with the ground:
+  // shadow strength, hover brightness, focus-ring alpha, disabled fade. Only
+  // shadow-k can plausibly reach the export today, but they are carried
+  // wholesale rather than judged one at a time — judging is how the next one
+  // gets left out, and being left out is silent by construction.
+  'shadow-k', 'btn-hover-k', 'focus-a', 'dim-o'];
 
 function ckStage(W, cls) {
   const stage = document.createElement('div');
@@ -7185,8 +7211,16 @@ function ckStage(W, cls) {
 // totally when the two diverge. Rather than hand someone a black rectangle
 // six months from now, render a known fixture and look at the pixels.
 let CK_CANARY = null;
+// Keyed on the palette, because the canary is a measurement of style.css AS
+// THEMED and it is cached for the session. Keying it here rather than clearing
+// it from applyTheme is not a style choice: applyTheme runs at parse time,
+// which is before this `let` is evaluated, so a write from up there would land
+// in the temporal dead zone and throw.
+let CK_CANARY_THEME = '';
 async function ckCanary() {
-  if (CK_CANARY !== null) return CK_CANARY;
+  const theme = S.theme || 'rose';
+  if (CK_CANARY !== null && CK_CANARY_THEME === theme) return CK_CANARY;
+  CK_CANARY_THEME = theme;
   const { stage, host } = ckStage(240, 'ck-export');
   try {
     const stream = document.createElement('div');
