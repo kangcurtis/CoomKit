@@ -125,6 +125,7 @@ CoomKit/          ← repo root
   wfpack.py       bundled workflows + stage splicing + slot filling
   vram.py         GPU broker: park the chat model for a big render, hand it back
   voices.py       shipped voice references for cloning
+  voiceclip.py    capture a clone reference from a video, and CHECK it
   tests/          the suite + testkit.py + _bootstrap.py + run.sh
   skills/         prompt dialects (anima, krea2, h3, klein, zimage, wan/ltx,
                   voice, music)
@@ -1587,6 +1588,49 @@ a reroll every time.
   across five references; a 167 Hz alto came out at 78 Hz. That band is also
   where pitch stops indicating gender, so never pick a reference by "sounds
   low". Shipped voices sit above 185 Hz and a test enforces it.
+
+  **`voiceclip.py` is the tool for the reference you bring yourself**
+  (2026-08-21) — grab a span out of a video, check it, install it on a
+  character. Downloading is the trivial half; the CHECK is why it exists,
+  because every way this fails is silent and you only find out after a
+  render. Capture shells out to yt-dlp and ffmpeg, which are external
+  binaries and not Python packages, so the stdlib-only rule is intact — the
+  same arrangement as the `lms` subprocess, and each missing tool is named in
+  a sentence rather than a traceback. `--inspect` needs neither.
+
+  **The estimator is pure stdlib and validated against ground truth, not
+  against the previous number.** Autocorrelation over voiced windows, read
+  with `wave` — deliberately NOT `audioop`, which would do the width
+  conversion in C and was removed in Python 3.13, i.e. it works on an old box
+  and raises ModuleNotFoundError on a current one. Synthesised harmonic
+  stacks at 110-440 Hz read back within 1%. Both octave errors are real and
+  pull opposite ways: taking the earliest lag within 15% of the best
+  correlation read all five shipped references HIGH (up to +22%), so the peak
+  is the global maximum with a strict (>= 0.9) submultiple check under it.
+  The two natural shipped readings then measured within 3% of their recorded
+  values.
+
+  Three things fell out of pointing it at the shipped set, all worth knowing:
+  **one number lies about an expressive voice** — `onee-san` reads 226-387 Hz
+  across successive two-second slices, so the tool reports a spread and not
+  just a median; **percentiles need defending from octave errors** where the
+  median does not, because a mis-tracked window lands at half or a quarter
+  and dragged `brat`'s reported floor to 109 Hz for a 399 Hz voice (picks
+  more than two thirds of an octave from the median are dropped first); and
+  **`natural-warm` genuinely spends ~33% of its voiced audio under the
+  185 Hz floor**, median 197, tenth percentile 179. That is the shipped
+  reference nearest the cliff, and it is the one the "chasing warmth down the
+  pitch scale" warning in `voices.py` is about.
+
+  **The declared `f0_hz` values for the three SYNTHESISED archetypes do not
+  match measurement** — brat 399 vs 462, onee-san 265 vs 316, mommy 269 vs
+  231 — while the two human readings agree within 3%. They were recorded by
+  hand from another tool and nothing has ever checked them against the audio;
+  `test_studio` only ever asserted the constants were above the floor.
+  Deliberately NOT rewritten here: the estimator is validated but the
+  provenance of those numbers is not known, and silently editing somebody
+  else's measurements to agree with a new tool is how a record stops being
+  one. `./voiceclip.py --check-shipped` re-derives them on demand.
 - **ComfyUI says exactly what is wrong and we used to throw it away.** A
   rejected graph 400s with a body naming the node, field and value;
   `comfy._explain_rejection` quotes it. A job that *errors* never produces
@@ -1724,6 +1768,15 @@ than asserting after a fixed number of exchanges.
   `cast_absent` firing fresh and decaying past the window, removal
   tombstones, and a new chat carrying no cast or director layer. Offline and
   free — the preview sends nothing.
+- `tests/test_voiceclip.py` pins the voice-capture tool, and needs neither
+  yt-dlp nor ffmpeg: every waveform is synthesised in memory with `wave`, so
+  the parts that are ours are tested without the parts that are somebody
+  else's. Ground truth first (a harmonic stack has an exactly known
+  fundamental), then the two octave traps, then silence, then the verdict
+  rules, then awkward WAVs — stereo folding and 8-bit's unsigned samples. Its
+  §3 is the only thing that has ever checked `voices.PRESETS`'s `f0_hz`
+  against the audio on disk rather than against itself, for the two
+  references `wave` can read without a decoder. Offline and free.
 - `tests/test_vision.py` pins the vision inline through `/api/chats/preview`:
   a card with `post_history_instructions` still gets the image on the USER
   turn (the old `messages[-1]` gate dropped it silently), a depth-0

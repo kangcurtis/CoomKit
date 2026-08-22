@@ -121,6 +121,13 @@ static files.
 **Voice**
 - Clone her from a 3–15 second clip, or use one of the bundled references, or
   describe the voice in words — OmniVoice and IndexTTS-2 both synthesise one.
+- `./voiceclip.py` grabs that clip out of a video — a URL or a local file —
+  and, more usefully, **checks it before you trust it**. A reference under
+  ~180 Hz can clone an octave down and come back male, and nothing in the
+  pipeline tells you: you find out after a render and blame the model. It
+  measures the pitch, the spread, the length and the levels, refuses the clip
+  if it will not work, and can install it straight onto a character. Needs
+  `yt-dlp` and `ffmpeg` on PATH for the capture; `--inspect` needs neither.
 - "Say it out loud" speaks the dialogue from her last reply and nothing else,
   so she doesn't read her own stage directions aloud.
 - Preview whatever you picked before you commit to it.
@@ -214,6 +221,7 @@ CoomKit/
   recipes.py   the one-click shots
   wfpack.py    workflow surgery
   vram.py      GPU brokering
+  voiceclip.py capture + check a voice
 ```
 
 ## Status
